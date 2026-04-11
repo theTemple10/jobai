@@ -9,6 +9,11 @@ const JSEARCH_API = "https://jsearch.p.rapidapi.com/search";
 const JSEARCH_KEY = import.meta.env.VITE_JSEARCH_KEY || "";
 const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // image CV parsing
 
+// EmailJS — real email delivery, free, no backend needed
+const EJS_SERVICE  = import.meta.env.VITE_EMAILJS_SERVICE_ID  || "";
+const EJS_TEMPLATE = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "";
+const EJS_KEY      = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  || "";
+
 const JOB_BOARDS = [
   { id: "linkedin", name: "LinkedIn", icon: "in", color: "#0077B5", url: "https://www.linkedin.com/jobs/search/?keywords=" },
   { id: "indeed", name: "Indeed", icon: "in", color: "#003A9B", url: "https://www.indeed.com/jobs?q=" },
@@ -171,7 +176,32 @@ async function callClaude({ system, userContent, maxTokens = 1000, useVision = f
   return data.choices?.[0]?.message?.content || "";
 }
 
-// ─── STEP INDICATOR ──────────────────────────────────────────────────────────
+// ─── EMAIL (EmailJS — real delivery, free) ───────────────────────────────────
+async function sendEmail({ toEmail, toName, jobTitle, company, board, date, message }) {
+  if (!EJS_SERVICE || !EJS_TEMPLATE || !EJS_KEY) {
+    console.warn("EmailJS not configured — skipping email.");
+    return;
+  }
+  // Load EmailJS SDK from CDN on first use
+  if (!window.emailjs) {
+    await new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js";
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    window.emailjs.init({ publicKey: EJS_KEY });
+  }
+  await window.emailjs.send(EJS_SERVICE, EJS_TEMPLATE, {
+    to_email: toEmail,
+    to_name:  toName  || "there",
+    job_title: jobTitle,
+    company,
+    board,
+    date,
+    message,
+  });
+}
 function StepIndicator({ current }) {
   return (
     <div className="flex items-center justify-center gap-0 mb-10">
@@ -887,15 +917,17 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
   const [tab, setTab] = useState("details");
   const [coverLetter, setCoverLetter] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [applying, setApplying] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  // Three-stage apply flow: idle → reviewing → done
+  const [applyStage, setApplyStage] = useState("idle");
 
   const board = JOB_BOARDS.find((b) => b.id === job.board) || JOB_BOARDS[0];
   const searchQuery = encodeURIComponent(`${job.title} ${job.company}`);
-  // Use the real apply link from JSearch if available, otherwise fall back to board search
   const applyUrl = job.applyUrl || `${board.url}${searchQuery}`;
 
   const generateCoverLetter = async () => {
     setGenerating(true);
+    setTab("coverletter");
     try {
       const letter = await callClaude({
         system: "You are an expert career coach. Write concise, impactful cover letters.",
@@ -906,19 +938,19 @@ Location: ${job.location}
 Job Description: ${job.description}
 Requirements: ${(job.requirements || []).join(", ")}
 
-Candidate Profile:
+Candidate:
 Name: ${profile.name}
-Current Title: ${profile.title}
+Title: ${profile.title}
 Skills: ${(profile.skills || []).slice(0, 8).join(", ")}
 Experience: ${(profile.experience || []).map((e) => `${e.role} at ${e.company} (${e.duration})`).join("; ")}
 Key Strengths: ${(profile.keyStrengths || []).join(", ")}
 
-Write a 3-paragraph cover letter that is professional, specific, and compelling. Address it to the Hiring Manager.`,
+Write a 3-paragraph cover letter. Professional, specific, compelling. Address to Hiring Manager.`,
         maxTokens: 700,
       });
       setCoverLetter(letter);
-      setTab("coverletter");
-      showToast("Cover letter generated!", "success");
+      setApplyStage("reviewing");
+      showToast("Cover letter ready — review and edit before applying", "success");
     } catch (err) {
       showToast(`Cover letter error: ${err.message?.slice(0, 80)}`, "error");
       console.error("Cover letter error:", err);
@@ -927,23 +959,64 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
     }
   };
 
-  const autoApply = async () => {
-    if (!coverLetter) {
-      showToast("Generate a cover letter first", "warning");
-      return;
+  // Honest one-click assist: opens the real job page + copies cover letter
+  // User pastes and submits themselves — no spoofing
+  const oneClickApply = async () => {
+    if (!coverLetter) { showToast("Generate and review your cover letter first", "warning"); return; }
+
+    // 1. Copy cover letter to clipboard
+    try { await navigator.clipboard.writeText(coverLetter); } catch {}
+
+    // 2. Open the real job posting
+    window.open(applyUrl, "_blank");
+
+    // 3. Mark as applied
+    onApply("assisted");
+
+    // 4. Send real confirmation email
+    if (profile.email) {
+      setSendingEmail(true);
+      try {
+        await sendEmail({
+          toEmail: profile.email,
+          toName:  profile.name,
+          jobTitle: job.title,
+          company:  job.company,
+          board:    board.name,
+          date:     new Date().toLocaleDateString(),
+          message:  `You used JobAI's one-click assist to apply for ${job.title} at ${job.company}. Your cover letter was copied to your clipboard and the job page was opened for you to paste and submit.`,
+        });
+        showToast(`✓ Job page opened & cover letter copied! Confirmation sent to ${profile.email}`, "success");
+      } catch {
+        showToast("✓ Job page opened & cover letter copied! (Email delivery failed — check EmailJS config)", "warning");
+      } finally {
+        setSendingEmail(false);
+      }
+    } else {
+      showToast("✓ Job page opened & cover letter copied to clipboard — paste it and submit!", "success");
     }
-    setApplying(true);
-    // Simulate submission — in a real app this would use an automation service
-    await new Promise((r) => setTimeout(r, 2000));
-    setApplying(false);
-    onApply("auto");
-    showToast(`✓ Application sent to ${job.company}! Check your email for confirmation.`, "success");
+
+    setApplyStage("done");
   };
 
-  const manualApply = () => {
+  // Plain manual apply — opens job page, marks applied, sends email
+  const manualApply = async () => {
     window.open(applyUrl, "_blank");
     onApply("manual");
-    showToast(`Opening ${board.name} — we've prepared your cover letter for pasting!`, "info");
+    if (profile.email) {
+      try {
+        await sendEmail({
+          toEmail: profile.email,
+          toName:  profile.name,
+          jobTitle: job.title,
+          company:  job.company,
+          board:    board.name,
+          date:     new Date().toLocaleDateString(),
+          message:  `You opened the application for ${job.title} at ${job.company} on ${board.name}.`,
+        });
+      } catch {}
+    }
+    showToast(`Opened ${board.name} — good luck!`, "info");
   };
 
   return (
@@ -975,10 +1048,7 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
             </div>
           </div>
           <div className="text-right">
-            <div
-              className="text-2xl font-bold font-mono"
-              style={{ color: job.match >= 90 ? "#00D9FF" : job.match >= 75 ? "#A78BFA" : "#F59E0B" }}
-            >
+            <div className="text-2xl font-bold font-mono" style={{ color: job.match >= 90 ? "#00D9FF" : job.match >= 75 ? "#A78BFA" : "#F59E0B" }}>
               {job.match}%
             </div>
             <div className="text-white/30 text-xs">match score</div>
@@ -986,32 +1056,63 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
           </div>
         </div>
 
+        {/* Apply actions */}
         {applied ? (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
             ✓ You already applied to this position
           </div>
+        ) : applyStage === "done" ? (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
+            ✓ Application assisted — job page opened, cover letter copied to clipboard
+          </div>
+        ) : applyStage === "reviewing" ? (
+          // Stage 2: cover letter is ready, show final action buttons
+          <div>
+            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm mb-3">
+              ✦ Review your cover letter in the tab below, then apply
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={generateCoverLetter}
+                disabled={generating}
+                className="px-5 py-2.5 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-500/30 transition-all disabled:opacity-50"
+              >
+                {generating ? "Regenerating…" : "↺ Regenerate"}
+              </button>
+              <button
+                onClick={manualApply}
+                className="px-5 py-2.5 rounded-xl bg-white/8 border border-white/12 text-white/70 text-sm font-medium hover:bg-white/12 transition-all"
+              >
+                ↗ Open Job Page Only
+              </button>
+              <button
+                onClick={oneClickApply}
+                disabled={sendingEmail}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-black text-sm font-bold transition-all"
+                style={{ background: "linear-gradient(135deg, #00D9FF, #0EA5E9)", boxShadow: "0 0 20px rgba(0,217,255,0.3)" }}
+              >
+                {sendingEmail ? "Sending email…" : "⚡ One-Click Assist"}
+              </button>
+            </div>
+            <p className="text-white/25 text-xs mt-3">
+              ⚡ One-Click Assist opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
+            </p>
+          </div>
         ) : (
+          // Stage 1: no cover letter yet
           <div className="flex flex-wrap gap-3">
             <button
               onClick={generateCoverLetter}
               disabled={generating}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-500/30 transition-all disabled:opacity-50"
             >
-              {generating ? "✦ Generating…" : "✦ AI Cover Letter"}
+              {generating ? "✦ Generating cover letter…" : "✦ Generate AI Cover Letter"}
             </button>
             <button
               onClick={manualApply}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/8 border border-white/12 text-white/70 text-sm font-medium hover:bg-white/12 transition-all"
             >
               ↗ Apply on {board.name}
-            </button>
-            <button
-              onClick={autoApply}
-              disabled={applying || !coverLetter}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-black text-sm font-bold transition-all disabled:opacity-40"
-              style={{ background: coverLetter ? "linear-gradient(135deg, #00D9FF, #0EA5E9)" : "#444" }}
-            >
-              {applying ? "Submitting…" : "⚡ AI Auto-Apply"}
             </button>
           </div>
         )}
@@ -1039,12 +1140,7 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
             <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">About the Role</h3>
             <p className="text-white/70 text-sm leading-relaxed mb-6">{job.description}</p>
             <div className="grid grid-cols-2 gap-4 text-sm">
-              {[
-                ["Industry", job.industry],
-                ["Posted", `${job.postedDays} days ago`],
-                ["Location", job.location],
-                ["Type", job.type],
-              ].map(([k, v]) => (
+              {[["Industry", job.industry], ["Posted", `${job.postedDays} days ago`], ["Location", job.location], ["Type", job.type]].map(([k, v]) => (
                 <div key={k} className="bg-white/3 rounded-xl p-3">
                   <div className="text-white/30 text-xs mb-1">{k}</div>
                   <div className="text-white/80">{v}</div>
@@ -1067,34 +1163,54 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
                   </div>
                 );
               })}
+              {(job.requirements || []).length === 0 && <p className="text-white/30 text-sm">No requirements listed — check the full posting.</p>}
             </div>
           </div>
         )}
         {tab === "coverletter" && (
           <div>
-            <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">AI-Generated Cover Letter</h3>
+            <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">
+              AI Cover Letter {coverLetter && <span className="text-cyan-400 ml-1">— editable</span>}
+            </h3>
             {coverLetter ? (
               <>
                 <textarea
                   value={coverLetter}
                   onChange={(e) => setCoverLetter(e.target.value)}
-                  rows={12}
+                  rows={14}
                   className="w-full bg-white/3 border border-white/8 rounded-xl text-white/80 text-sm leading-relaxed p-4 resize-none focus:outline-none focus:border-cyan-400/30"
                   style={{ fontFamily: "'Outfit', sans-serif" }}
                 />
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => { navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success"); }} className="px-4 py-2 rounded-xl bg-white/8 text-white/60 text-sm hover:bg-white/12 transition-all">
-                    Copy
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success"); }}
+                    className="px-4 py-2 rounded-xl bg-white/8 text-white/60 text-sm hover:bg-white/12 transition-all"
+                  >
+                    📋 Copy
                   </button>
-                  <button onClick={generateCoverLetter} className="px-4 py-2 rounded-xl bg-violet-500/20 text-violet-300 text-sm hover:bg-violet-500/30 transition-all">
-                    Regenerate
+                  <button
+                    onClick={generateCoverLetter}
+                    disabled={generating}
+                    className="px-4 py-2 rounded-xl bg-violet-500/20 text-violet-300 text-sm hover:bg-violet-500/30 transition-all disabled:opacity-50"
+                  >
+                    {generating ? "Regenerating…" : "↺ Regenerate"}
                   </button>
+                  {applyStage === "reviewing" && (
+                    <button
+                      onClick={oneClickApply}
+                      disabled={sendingEmail}
+                      className="ml-auto px-4 py-2 rounded-xl text-black text-sm font-bold"
+                      style={{ background: "linear-gradient(135deg, #00D9FF, #0EA5E9)" }}
+                    >
+                      {sendingEmail ? "Sending…" : "⚡ Apply Now"}
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
               <div className="text-center py-8 text-white/30">
                 <div className="text-3xl mb-3">✦</div>
-                <p className="text-sm mb-4">Click "AI Cover Letter" to generate a personalised letter</p>
+                <p className="text-sm mb-4">Generate a cover letter to see it here — you can edit it before applying</p>
                 <button
                   onClick={generateCoverLetter}
                   disabled={generating}
@@ -1113,7 +1229,7 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
 
 // ─── TRACKER PANEL ────────────────────────────────────────────────────────────
 function TrackerPanel({ applications, onClose }) {
-  const statuses = { manual: "Submitted", auto: "Auto-Applied" };
+  const statuses = { manual: "Opened listing", assisted: "One-click assisted" };
   return (
     <div
       className="fixed inset-0 z-40 flex justify-end"
