@@ -5,6 +5,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // Get your free key at: https://console.groq.com (sign up with email or Google)
 const GROQ_API = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "llama-3.3-70b-versatile";      // text tasks
+const JSEARCH_API = "https://jsearch.p.rapidapi.com/search";
+const JSEARCH_KEY = import.meta.env.VITE_JSEARCH_KEY || "";
 const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // image CV parsing
 
 const JOB_BOARDS = [
