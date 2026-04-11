@@ -610,6 +610,7 @@ function JobsStep({ profile, onApply }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [remoteOnly, setRemoteOnly] = useState(false);
+  const [location, setLocation] = useState("all");
   const [applied, setApplied] = useState({});
   const [selected, setSelected] = useState(null);
   const done = useRef(false);
@@ -675,6 +676,7 @@ function JobsStep({ profile, onApply }) {
   const generateJobs = async () => {
     // Build search queries from profile job titles
     const queries = (profile.jobTitles || [profile.title]).slice(0, 3);
+    const locationQuery = location !== "all" ? ` in ${location}` : "";
 
     // Add remote query if eligible
     const remoteEligible = isRemoteEligible(profile.title, profile.skills);
@@ -686,7 +688,7 @@ function JobsStep({ profile, onApply }) {
       // Fetch results for each query in parallel
       const results = await Promise.allSettled(
         queries.map((q) =>
-          fetch(`${JSEARCH_API}?query=${encodeURIComponent(q)}&num_pages=1&date_posted=month`, {
+          fetch(`${JSEARCH_API}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month`, {
             headers: {
               "X-RapidAPI-Key": JSEARCH_KEY,
               "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
@@ -737,11 +739,27 @@ function JobsStep({ profile, onApply }) {
     return true;
   });
 
+  const LOCATIONS = [
+    { value: "all", label: "🌍 All Locations" },
+    { value: "Nigeria", label: "🇳🇬 Nigeria" },
+    { value: "United States", label: "🇺🇸 USA" },
+    { value: "United Kingdom", label: "🇬🇧 UK" },
+    { value: "Canada", label: "🇨🇦 Canada" },
+    { value: "Australia", label: "🇦🇺 Australia" },
+    { value: "Germany", label: "🇩🇪 Germany" },
+    { value: "Netherlands", label: "🇳🇱 Netherlands" },
+    { value: "UAE", label: "🇦🇪 UAE" },
+    { value: "South Africa", label: "🇿🇦 South Africa" },
+    { value: "Remote", label: "💻 Remote (Anywhere)" },
+  ];
+
   const getBoardColor = (id) => JOB_BOARDS.find((b) => b.id === id)?.color || "#888";
   const getBoardName = (id) => JOB_BOARDS.find((b) => b.id === id)?.name || id;
 
   const markApplied = (jobId, method) => {
+    const job = jobs.find((j) => j.id === jobId);
     setApplied((prev) => ({ ...prev, [jobId]: method }));
+    if (job) onApply(job, method); // ← saves to localStorage tracker
     showToast(`Application ${method === "auto" ? "submitted" : "opened"} successfully!`, "success");
   };
 
@@ -769,16 +787,34 @@ function JobsStep({ profile, onApply }) {
           <p className="text-white/40 text-sm">Based on your profile · Sorted by match score</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {remote && (
-            <button
-              onClick={() => setRemoteOnly((v) => !v)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                remoteOnly ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-white/5 border-white/10 text-white/50 hover:border-white/25"
-              }`}
-            >
-              🌍 Remote Only
-            </button>
-          )}
+          {/* Location picker */}
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-sm focus:outline-none focus:border-cyan-400/40"
+          >
+            {LOCATIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+          </select>
+
+          {/* Re-search with new location */}
+          <button
+            onClick={() => { setJobs([]); setLoading(true); done.current = false; generateJobs(); }}
+            className="px-4 py-2 rounded-xl bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 text-sm font-medium hover:bg-cyan-400/20 transition-all"
+          >
+            🔍 Search
+          </button>
+
+          {/* Remote toggle — shown for all professions */}
+          <button
+            onClick={() => setRemoteOnly((v) => !v)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+              remoteOnly ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-white/5 border-white/10 text-white/50 hover:border-white/25"
+            }`}
+          >
+            💻 Remote Only
+          </button>
+
+          {/* Board filter */}
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -1119,11 +1155,15 @@ function TrackerPanel({ applications, onClose }) {
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
+// Tiny localStorage helpers
+const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+const load = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
+
 export default function App() {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => load("jobai_step", 0));
   const [uploadData, setUploadData] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [applications, setApplications] = useState([]);
+  const [profile, setProfile] = useState(() => load("jobai_profile", null));
+  const [applications, setApplications] = useState(() => load("jobai_applications", []));
   const [showTracker, setShowTracker] = useState(false);
 
   const handleUpload = (data) => {
@@ -1135,13 +1175,17 @@ export default function App() {
   const handleParsed = (parsedProfile) => {
     if (!parsedProfile) { setStep(0); return; }
     setProfile(parsedProfile);
+    save("jobai_profile", parsedProfile);
     setStep(2);
+    save("jobai_step", 2);
     showToast(`Profile built for ${parsedProfile.name || "you"}!`, "success");
   };
 
   const handleProfileDone = (p) => {
     setProfile(p);
+    save("jobai_profile", p);
     setStep(3);
+    save("jobai_step", 3);
     showToast("Finding your best job matches…", "info");
   };
 
@@ -1152,12 +1196,24 @@ export default function App() {
       method,
       date: new Date().toLocaleDateString(),
       board: job.board,
+      applyUrl: job.applyUrl || "",
     };
     setApplications((prev) => {
       const updated = [app, ...prev];
+      save("jobai_applications", updated);
       if (updated.length === 1) showToast("Application tracker updated!", "info");
       return updated;
     });
+  };
+
+  // Let user start fresh — clears everything
+  const handleReset = () => {
+    ["jobai_step", "jobai_profile", "jobai_applications"].forEach((k) => localStorage.removeItem(k));
+    setStep(0);
+    setProfile(null);
+    setApplications([]);
+    setUploadData(null);
+    showToast("Started fresh — upload a new CV anytime.", "info");
   };
 
   return (
@@ -1208,6 +1264,14 @@ export default function App() {
                 </span>
               ))}
             </div>
+            {step > 0 && (
+              <button
+                onClick={handleReset}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-white/4 border border-white/8 hover:border-red-400/30 text-white/30 hover:text-red-400"
+              >
+                ↺ Fresh Start
+              </button>
+            )}
             <button
               onClick={() => setShowTracker(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-white/6 border border-white/10 hover:border-white/25 text-white/60 hover:text-white"
@@ -1225,6 +1289,8 @@ export default function App() {
           {step === 1 && uploadData && (
             <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} />
           )}
+          {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
+          {step === 1 && !uploadData && <UploadStep onNext={handleUpload} />}
           {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
           {step === 3 && profile && (
             <JobsStep
@@ -1232,6 +1298,8 @@ export default function App() {
               onApply={(job, method) => handleApply(job, method)}
             />
           )}
+          {/* If step=2 or 3 but profile lost somehow, go back to upload */}
+          {(step === 2 || step === 3) && !profile && <UploadStep onNext={handleUpload} />}
         </main>
 
         {/* Footer */}
