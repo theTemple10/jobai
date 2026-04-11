@@ -622,48 +622,100 @@ function JobsStep({ profile, onApply }) {
     generateJobs();
   }, []);
 
+  // Normalise a raw JSearch result into our app's job shape
+  const normaliseJob = (item, index) => {
+    const boardMap = {
+      linkedin: "linkedin", indeed: "indeed", glassdoor: "glassdoor",
+      remoteok: "remoteok", wellfound: "wellfound", weworkremotely: "weworkremotely",
+    };
+    const sourceRaw = (item.job_publisher || "indeed").toLowerCase();
+    const board = Object.keys(boardMap).find((k) => sourceRaw.includes(k)) || "indeed";
+    const isRemote = item.job_is_remote || false;
+    const postedTs = item.job_posted_at_timestamp;
+    const postedDays = postedTs
+      ? Math.max(1, Math.round((Date.now() / 1000 - postedTs) / 86400))
+      : Math.floor(Math.random() * 14) + 1;
+
+    // Calculate a rough match score based on skill overlap
+    const jobText = `${item.job_title} ${item.job_description || ""} ${(item.job_highlights?.Qualifications || []).join(" ")}`.toLowerCase();
+    const skillMatches = (profile.skills || []).filter((s) => jobText.includes(s.toLowerCase())).length;
+    const match = Math.min(98, 65 + skillMatches * 4 + Math.floor(Math.random() * 8));
+
+    return {
+      id: item.job_id || `job_${index}`,
+      title: item.job_title || "Role",
+      company: item.employer_name || "Company",
+      location: item.job_is_remote
+        ? "Remote"
+        : [item.job_city, item.job_country].filter(Boolean).join(", ") || "Location TBC",
+      type: item.job_employment_type
+        ? item.job_employment_type.replace("_", "-").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+        : "Full-time",
+      remote: isRemote,
+      salary: item.job_min_salary && item.job_max_salary
+        ? `${item.job_salary_currency || "$"}${Math.round(item.job_min_salary / 1000)}k – ${Math.round(item.job_max_salary / 1000)}k`
+        : item.job_salary_period ? `${item.job_salary_currency || ""}${item.job_min_salary || ""}${item.job_salary_period}` : "Salary not listed",
+      match,
+      board,
+      applyUrl: item.job_apply_link || "",
+      description: item.job_description
+        ? item.job_description.slice(0, 180).trim() + "…"
+        : "See full listing for details.",
+      requirements: (item.job_highlights?.Qualifications || []).slice(0, 3),
+      postedDays,
+      industry: item.job_publisher || "General",
+      urgent: postedDays <= 3,
+      tags: [
+        isRemote ? "Remote" : "On-site",
+        item.job_employment_type === "FULLTIME" ? "Full-time" : item.job_employment_type || "Contract",
+      ],
+    };
+  };
+
   const generateJobs = async () => {
+    // Build search queries from profile job titles
+    const queries = (profile.jobTitles || [profile.title]).slice(0, 3);
+
+    // Add remote query if eligible
+    const remoteEligible = isRemoteEligible(profile.title, profile.skills);
+    if (remoteEligible) queries.push(`${profile.title} remote`);
+
     try {
-      const raw = await callClaude({
-        system: "You are a job market expert. You must return ONLY a raw JSON array. No markdown, no code fences, no explanation. Start your response with [ and end with ].",
-        userContent: `Generate 8 realistic job listings for this candidate:
-Title: ${profile.title}
-Skills: ${(profile.skills || []).slice(0, 8).join(", ")}
-Experience: ${(profile.experience || []).slice(0, 3).map((e) => `${e.role} at ${e.company}`).join("; ")}
-Seniority: ${profile.seniority}
-Location: ${profile.location}
+      if (!JSEARCH_KEY) throw new Error("Missing VITE_JSEARCH_KEY in .env.local");
 
-Return ONLY a JSON array starting with [ — 8 objects, each with EXACTLY these keys:
-id, title, company, location, type, remote, salary, match, board, description, requirements, postedDays, industry, urgent, tags
+      // Fetch results for each query in parallel
+      const results = await Promise.allSettled(
+        queries.map((q) =>
+          fetch(`${JSEARCH_API}?query=${encodeURIComponent(q)}&num_pages=1&date_posted=month`, {
+            headers: {
+              "X-RapidAPI-Key": JSEARCH_KEY,
+              "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
+            },
+          }).then((r) => r.json())
+        )
+      );
 
-board must be one of: linkedin, indeed, glassdoor, remoteok, wellfound, weworkremotely
-match is a number 70-98
-remote is true or false
-requirements is an array of 3 strings
-tags is an array of 2 strings
-postedDays is a number 1-14
-urgent is true or false
-
-Start response with [ immediately. No text before or after the JSON array.`,
-        maxTokens: 2000,
+      // Flatten, deduplicate by job_id, normalise
+      const seen = new Set();
+      const allJobs = [];
+      results.forEach((r) => {
+        if (r.status === "fulfilled" && Array.isArray(r.value?.data)) {
+          r.value.data.forEach((item, i) => {
+            if (!seen.has(item.job_id)) {
+              seen.add(item.job_id);
+              allJobs.push(normaliseJob(item, allJobs.length));
+            }
+          });
+        }
       });
 
-      // Robust JSON extraction — handles markdown fences, extra text, etc.
-      let clean = raw.trim();
-      // Strip markdown fences if present
-      clean = clean.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-      // Find the JSON array boundaries
-      const start = clean.indexOf("[");
-      const end = clean.lastIndexOf("]");
-      if (start === -1 || end === -1) throw new Error(`No JSON array found in response. Got: ${clean.slice(0, 120)}`);
-      clean = clean.slice(start, end + 1);
+      if (allJobs.length === 0) throw new Error("No results returned from JSearch");
 
-      const parsed = JSON.parse(clean);
-      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty job list returned");
-      setJobs(parsed);
-      showToast(`Found ${parsed.length} matching jobs!`, "success");
+      // Sort by match score descending
+      allJobs.sort((a, b) => b.match - a.match);
+      setJobs(allJobs);
+      showToast(`Found ${allJobs.length} real job listings!`, "success");
     } catch (err) {
-      // Show actual error so we can debug
       showToast(`Job search error: ${err.message?.slice(0, 80)}`, "error");
       console.error("generateJobs error:", err);
       setJobs(sampleJobs(profile));
@@ -673,8 +725,9 @@ Start response with [ immediately. No text before or after the JSON array.`,
   };
 
   const sampleJobs = (p) => [
-    { id: "1", title: p.jobTitles?.[0] || "Software Engineer", company: "TechCorp", location: "San Francisco, US", type: "Full-time", remote: true, salary: "$120k–$160k", match: 95, board: "linkedin", description: "Build scalable systems.", requirements: ["Python", "AWS", "SQL"], postedDays: 2, industry: "SaaS", urgent: true, tags: ["Remote", "Series B"] },
-    { id: "2", title: p.jobTitles?.[1] || "Senior Developer", company: "GlobalBank", location: "London, UK", type: "Full-time", remote: false, salary: "£80k–£110k", match: 88, board: "indeed", description: "Lead development.", requirements: ["Java", "Spring", "CI/CD"], postedDays: 5, industry: "FinTech", urgent: false, tags: ["Hybrid", "FTSE 100"] },
+    { id: "1", title: p.jobTitles?.[0] || "Software Engineer", company: "TechCorp", location: "San Francisco, US", type: "Full-time", remote: true, salary: "$120k–$160k", match: 95, board: "linkedin", applyUrl: "", description: "Build scalable systems.", requirements: ["Python", "AWS", "SQL"], postedDays: 2, industry: "SaaS", urgent: true, tags: ["Remote", "Full-time"] },
+    { id: "2", title: p.jobTitles?.[1] || "Senior Developer", company: "GlobalBank", location: "London, UK", type: "Full-time", remote: false, salary: "£80k–£110k", match: 88, board: "indeed", applyUrl: "", description: "Lead development.", requirements: ["Java", "Spring", "CI/CD"], postedDays: 5, industry: "FinTech", urgent: false, tags: ["On-site", "Full-time"] },
+    { id: "3", title: p.jobTitles?.[2] || "Backend Developer", company: "Startup Inc", location: "Remote", type: "Contract", remote: true, salary: "$80k–$100k", match: 82, board: "remoteok", applyUrl: "", description: "Work on exciting backend systems.", requirements: ["Node.js", "PostgreSQL", "REST APIs"], postedDays: 7, industry: "Tech", urgent: false, tags: ["Remote", "Contract"] },
   ];
 
   const boards = [...new Set(jobs.map((j) => j.board))];
@@ -802,7 +855,8 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
 
   const board = JOB_BOARDS.find((b) => b.id === job.board) || JOB_BOARDS[0];
   const searchQuery = encodeURIComponent(`${job.title} ${job.company}`);
-  const applyUrl = `${board.url}${searchQuery}`;
+  // Use the real apply link from JSearch if available, otherwise fall back to board search
+  const applyUrl = job.applyUrl || `${board.url}${searchQuery}`;
 
   const generateCoverLetter = async () => {
     setGenerating(true);
