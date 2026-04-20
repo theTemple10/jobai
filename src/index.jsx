@@ -1,18 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
-// Using Groq — 100% free, no credit card, works in Nigeria
-// Get your free key at: https://console.groq.com (sign up with email or Google)
-const GROQ_API = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.3-70b-versatile";      // text tasks
-const JSEARCH_API = "https://jsearch.p.rapidapi.com/search";
-const JSEARCH_KEY = import.meta.env.VITE_JSEARCH_KEY || "";
-const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // image CV parsing
-
-// EmailJS — real email delivery, free, no backend needed
+// All sensitive keys (Groq, JSearch) live server-side in /api/*.js
+// EmailJS public key is intentionally client-side — that's how EmailJS works
 const EJS_SERVICE  = import.meta.env.VITE_EMAILJS_SERVICE_ID  || "";
 const EJS_TEMPLATE = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "";
 const EJS_KEY      = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  || "";
+
+// Proxy endpoints (Vercel serverless functions in /api/)
+const PROXY_GROQ = "/api/groq";
+const PROXY_JOBS = "/api/jobs";
 
 const JOB_BOARDS = [
   { id: "linkedin", name: "LinkedIn", icon: "in", color: "#0077B5", url: "https://www.linkedin.com/jobs/search/?keywords=" },
@@ -122,21 +119,14 @@ function ToastContainer() {
   );
 }
 
-// ─── API CALL (Groq — free globally, no credit card ever) ────────────────────
-const API_KEY = import.meta.env.VITE_GROQ_API_KEY || "";
-
+// ─── API CALL (via secure server proxy — keys never in browser) ──────────────
 async function callClaude({ system, userContent, maxTokens = 1000, useVision = false }) {
-  if (!API_KEY) {
-    throw new Error("Missing API key. Add VITE_GROQ_API_KEY to your .env.local and restart the dev server.");
-  }
-
   // Build message content for Groq (OpenAI-compatible format)
   let messageContent;
   if (typeof userContent === "string") {
     messageContent = userContent;
   } else if (Array.isArray(userContent)) {
     if (useVision) {
-      // Vision model — pass image + text as multipart
       messageContent = userContent.map((block) => {
         if (block.type === "text") return { type: "text", text: block.text };
         if (block.type === "image") {
@@ -148,28 +138,25 @@ async function callClaude({ system, userContent, maxTokens = 1000, useVision = f
         return { type: "text", text: block.text || "" };
       });
     } else {
-      // Text-only: flatten everything into one string
       messageContent = userContent.map((b) => b.text || b.cvText || "").join("\n\n");
     }
   }
 
-  const model = useVision ? GROQ_VISION_MODEL : GROQ_MODEL;
+  const model = useVision ? "meta-llama/llama-4-scout-17b-16e-instruct" : "llama-3.3-70b-versatile";
   const messages = [];
   if (system) messages.push({ role: "system", content: system });
   messages.push({ role: "user", content: messageContent });
 
-  const res = await fetch(GROQ_API, {
+  // Call our own proxy — key stays on the server
+  const res = await fetch("/api/groq", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${API_KEY}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `API error ${res.status}`);
+    throw new Error(err?.error?.message || err?.error || `API error ${res.status}`);
   }
 
   const data = await res.json();
@@ -713,17 +700,11 @@ function JobsStep({ profile, onApply }) {
     if (remoteEligible) queries.push(`${profile.title} remote`);
 
     try {
-      if (!JSEARCH_KEY) throw new Error("Missing VITE_JSEARCH_KEY in .env.local");
 
-      // Fetch results for each query in parallel
+      // Fetch results for each query in parallel via our secure proxy
       const results = await Promise.allSettled(
         queries.map((q) =>
-          fetch(`${JSEARCH_API}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month`, {
-            headers: {
-              "X-RapidAPI-Key": JSEARCH_KEY,
-              "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
-            },
-          }).then((r) => r.json())
+          fetch(`${PROXY_JOBS}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month`).then((r) => r.json())
         )
       );
 
