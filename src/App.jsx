@@ -5,7 +5,14 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // Get your free key at: https://console.groq.com (sign up with email or Google)
 const GROQ_API = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "llama-3.3-70b-versatile";      // text tasks
+const JSEARCH_API = "https://jsearch.p.rapidapi.com/search";
+const JSEARCH_KEY = import.meta.env.VITE_JSEARCH_KEY || "";
 const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // image CV parsing
+
+// EmailJS — real email delivery, free, no backend needed
+const EJS_SERVICE  = import.meta.env.VITE_EMAILJS_SERVICE_ID  || "";
+const EJS_TEMPLATE = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "";
+const EJS_KEY      = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  || "";
 
 const JOB_BOARDS = [
   { id: "linkedin", name: "LinkedIn", icon: "in", color: "#0077B5", url: "https://www.linkedin.com/jobs/search/?keywords=" },
@@ -169,7 +176,32 @@ async function callClaude({ system, userContent, maxTokens = 1000, useVision = f
   return data.choices?.[0]?.message?.content || "";
 }
 
-// ─── STEP INDICATOR ──────────────────────────────────────────────────────────
+// ─── EMAIL (EmailJS — real delivery, free) ───────────────────────────────────
+async function sendEmail({ toEmail, toName, jobTitle, company, board, date, message }) {
+  if (!EJS_SERVICE || !EJS_TEMPLATE || !EJS_KEY) {
+    console.warn("EmailJS not configured — skipping email.");
+    return;
+  }
+  // Load EmailJS SDK from CDN on first use
+  if (!window.emailjs) {
+    await new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js";
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    window.emailjs.init({ publicKey: EJS_KEY });
+  }
+  await window.emailjs.send(EJS_SERVICE, EJS_TEMPLATE, {
+    to_email: toEmail,
+    to_name:  toName  || "there",
+    job_title: jobTitle,
+    company,
+    board,
+    date,
+    message,
+  });
+}
 function StepIndicator({ current }) {
   return (
     <div className="flex items-center justify-center gap-0 mb-10">
@@ -608,6 +640,7 @@ function JobsStep({ profile, onApply }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [remoteOnly, setRemoteOnly] = useState(false);
+  const [location, setLocation] = useState("all");
   const [applied, setApplied] = useState({});
   const [selected, setSelected] = useState(null);
   const done = useRef(false);
@@ -620,48 +653,101 @@ function JobsStep({ profile, onApply }) {
     generateJobs();
   }, []);
 
+  // Normalise a raw JSearch result into our app's job shape
+  const normaliseJob = (item, index) => {
+    const boardMap = {
+      linkedin: "linkedin", indeed: "indeed", glassdoor: "glassdoor",
+      remoteok: "remoteok", wellfound: "wellfound", weworkremotely: "weworkremotely",
+    };
+    const sourceRaw = (item.job_publisher || "indeed").toLowerCase();
+    const board = Object.keys(boardMap).find((k) => sourceRaw.includes(k)) || "indeed";
+    const isRemote = item.job_is_remote || false;
+    const postedTs = item.job_posted_at_timestamp;
+    const postedDays = postedTs
+      ? Math.max(1, Math.round((Date.now() / 1000 - postedTs) / 86400))
+      : Math.floor(Math.random() * 14) + 1;
+
+    // Calculate a rough match score based on skill overlap
+    const jobText = `${item.job_title} ${item.job_description || ""} ${(item.job_highlights?.Qualifications || []).join(" ")}`.toLowerCase();
+    const skillMatches = (profile.skills || []).filter((s) => jobText.includes(s.toLowerCase())).length;
+    const match = Math.min(98, 65 + skillMatches * 4 + Math.floor(Math.random() * 8));
+
+    return {
+      id: item.job_id || `job_${index}`,
+      title: item.job_title || "Role",
+      company: item.employer_name || "Company",
+      location: item.job_is_remote
+        ? "Remote"
+        : [item.job_city, item.job_country].filter(Boolean).join(", ") || "Location TBC",
+      type: item.job_employment_type
+        ? item.job_employment_type.replace("_", "-").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+        : "Full-time",
+      remote: isRemote,
+      salary: item.job_min_salary && item.job_max_salary
+        ? `${item.job_salary_currency || "$"}${Math.round(item.job_min_salary / 1000)}k – ${Math.round(item.job_max_salary / 1000)}k`
+        : item.job_salary_period ? `${item.job_salary_currency || ""}${item.job_min_salary || ""}${item.job_salary_period}` : "Salary not listed",
+      match,
+      board,
+      applyUrl: item.job_apply_link || "",
+      description: item.job_description
+        ? item.job_description.slice(0, 180).trim() + "…"
+        : "See full listing for details.",
+      requirements: (item.job_highlights?.Qualifications || []).slice(0, 3),
+      postedDays,
+      industry: item.job_publisher || "General",
+      urgent: postedDays <= 3,
+      tags: [
+        isRemote ? "Remote" : "On-site",
+        item.job_employment_type === "FULLTIME" ? "Full-time" : item.job_employment_type || "Contract",
+      ],
+    };
+  };
+
   const generateJobs = async () => {
+    // Build search queries from profile job titles
+    const queries = (profile.jobTitles || [profile.title]).slice(0, 3);
+    const locationQuery = location !== "all" ? ` in ${location}` : "";
+
+    // Add remote query if eligible
+    const remoteEligible = isRemoteEligible(profile.title, profile.skills);
+    if (remoteEligible) queries.push(`${profile.title} remote`);
+
     try {
-      const raw = await callClaude({
-        system: "You are a job market expert. You must return ONLY a raw JSON array. No markdown, no code fences, no explanation. Start your response with [ and end with ].",
-        userContent: `Generate 8 realistic job listings for this candidate:
-Title: ${profile.title}
-Skills: ${(profile.skills || []).slice(0, 8).join(", ")}
-Experience: ${(profile.experience || []).slice(0, 3).map((e) => `${e.role} at ${e.company}`).join("; ")}
-Seniority: ${profile.seniority}
-Location: ${profile.location}
+      if (!JSEARCH_KEY) throw new Error("Missing VITE_JSEARCH_KEY in .env.local");
 
-Return ONLY a JSON array starting with [ — 8 objects, each with EXACTLY these keys:
-id, title, company, location, type, remote, salary, match, board, description, requirements, postedDays, industry, urgent, tags
+      // Fetch results for each query in parallel
+      const results = await Promise.allSettled(
+        queries.map((q) =>
+          fetch(`${JSEARCH_API}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month`, {
+            headers: {
+              "X-RapidAPI-Key": JSEARCH_KEY,
+              "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
+            },
+          }).then((r) => r.json())
+        )
+      );
 
-board must be one of: linkedin, indeed, glassdoor, remoteok, wellfound, weworkremotely
-match is a number 70-98
-remote is true or false
-requirements is an array of 3 strings
-tags is an array of 2 strings
-postedDays is a number 1-14
-urgent is true or false
-
-Start response with [ immediately. No text before or after the JSON array.`,
-        maxTokens: 2000,
+      // Flatten, deduplicate by job_id, normalise
+      const seen = new Set();
+      const allJobs = [];
+      results.forEach((r) => {
+        if (r.status === "fulfilled" && Array.isArray(r.value?.data)) {
+          r.value.data.forEach((item, i) => {
+            if (!seen.has(item.job_id)) {
+              seen.add(item.job_id);
+              allJobs.push(normaliseJob(item, allJobs.length));
+            }
+          });
+        }
       });
 
-      // Robust JSON extraction — handles markdown fences, extra text, etc.
-      let clean = raw.trim();
-      // Strip markdown fences if present
-      clean = clean.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-      // Find the JSON array boundaries
-      const start = clean.indexOf("[");
-      const end = clean.lastIndexOf("]");
-      if (start === -1 || end === -1) throw new Error(`No JSON array found in response. Got: ${clean.slice(0, 120)}`);
-      clean = clean.slice(start, end + 1);
+      if (allJobs.length === 0) throw new Error("No results returned from JSearch");
 
-      const parsed = JSON.parse(clean);
-      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty job list returned");
-      setJobs(parsed);
-      showToast(`Found ${parsed.length} matching jobs!`, "success");
+      // Sort by match score descending
+      allJobs.sort((a, b) => b.match - a.match);
+      setJobs(allJobs);
+      showToast(`Found ${allJobs.length} real job listings!`, "success");
     } catch (err) {
-      // Show actual error so we can debug
       showToast(`Job search error: ${err.message?.slice(0, 80)}`, "error");
       console.error("generateJobs error:", err);
       setJobs(sampleJobs(profile));
@@ -671,8 +757,9 @@ Start response with [ immediately. No text before or after the JSON array.`,
   };
 
   const sampleJobs = (p) => [
-    { id: "1", title: p.jobTitles?.[0] || "Software Engineer", company: "TechCorp", location: "San Francisco, US", type: "Full-time", remote: true, salary: "$120k–$160k", match: 95, board: "linkedin", description: "Build scalable systems.", requirements: ["Python", "AWS", "SQL"], postedDays: 2, industry: "SaaS", urgent: true, tags: ["Remote", "Series B"] },
-    { id: "2", title: p.jobTitles?.[1] || "Senior Developer", company: "GlobalBank", location: "London, UK", type: "Full-time", remote: false, salary: "£80k–£110k", match: 88, board: "indeed", description: "Lead development.", requirements: ["Java", "Spring", "CI/CD"], postedDays: 5, industry: "FinTech", urgent: false, tags: ["Hybrid", "FTSE 100"] },
+    { id: "1", title: p.jobTitles?.[0] || "Software Engineer", company: "TechCorp", location: "San Francisco, US", type: "Full-time", remote: true, salary: "$120k–$160k", match: 95, board: "linkedin", applyUrl: "", description: "Build scalable systems.", requirements: ["Python", "AWS", "SQL"], postedDays: 2, industry: "SaaS", urgent: true, tags: ["Remote", "Full-time"] },
+    { id: "2", title: p.jobTitles?.[1] || "Senior Developer", company: "GlobalBank", location: "London, UK", type: "Full-time", remote: false, salary: "£80k–£110k", match: 88, board: "indeed", applyUrl: "", description: "Lead development.", requirements: ["Java", "Spring", "CI/CD"], postedDays: 5, industry: "FinTech", urgent: false, tags: ["On-site", "Full-time"] },
+    { id: "3", title: p.jobTitles?.[2] || "Backend Developer", company: "Startup Inc", location: "Remote", type: "Contract", remote: true, salary: "$80k–$100k", match: 82, board: "remoteok", applyUrl: "", description: "Work on exciting backend systems.", requirements: ["Node.js", "PostgreSQL", "REST APIs"], postedDays: 7, industry: "Tech", urgent: false, tags: ["Remote", "Contract"] },
   ];
 
   const boards = [...new Set(jobs.map((j) => j.board))];
@@ -682,11 +769,27 @@ Start response with [ immediately. No text before or after the JSON array.`,
     return true;
   });
 
+  const LOCATIONS = [
+    { value: "all", label: "🌍 All Locations" },
+    { value: "Nigeria", label: "🇳🇬 Nigeria" },
+    { value: "United States", label: "🇺🇸 USA" },
+    { value: "United Kingdom", label: "🇬🇧 UK" },
+    { value: "Canada", label: "🇨🇦 Canada" },
+    { value: "Australia", label: "🇦🇺 Australia" },
+    { value: "Germany", label: "🇩🇪 Germany" },
+    { value: "Netherlands", label: "🇳🇱 Netherlands" },
+    { value: "UAE", label: "🇦🇪 UAE" },
+    { value: "South Africa", label: "🇿🇦 South Africa" },
+    { value: "Remote", label: "💻 Remote (Anywhere)" },
+  ];
+
   const getBoardColor = (id) => JOB_BOARDS.find((b) => b.id === id)?.color || "#888";
   const getBoardName = (id) => JOB_BOARDS.find((b) => b.id === id)?.name || id;
 
   const markApplied = (jobId, method) => {
+    const job = jobs.find((j) => j.id === jobId);
     setApplied((prev) => ({ ...prev, [jobId]: method }));
+    if (job) onApply(job, method); // ← saves to localStorage tracker
     showToast(`Application ${method === "auto" ? "submitted" : "opened"} successfully!`, "success");
   };
 
@@ -714,16 +817,34 @@ Start response with [ immediately. No text before or after the JSON array.`,
           <p className="text-white/40 text-sm">Based on your profile · Sorted by match score</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {remote && (
-            <button
-              onClick={() => setRemoteOnly((v) => !v)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                remoteOnly ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-white/5 border-white/10 text-white/50 hover:border-white/25"
-              }`}
-            >
-              🌍 Remote Only
-            </button>
-          )}
+          {/* Location picker */}
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-sm focus:outline-none focus:border-cyan-400/40"
+          >
+            {LOCATIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+          </select>
+
+          {/* Re-search with new location */}
+          <button
+            onClick={() => { setJobs([]); setLoading(true); done.current = false; generateJobs(); }}
+            className="px-4 py-2 rounded-xl bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 text-sm font-medium hover:bg-cyan-400/20 transition-all"
+          >
+            🔍 Search
+          </button>
+
+          {/* Remote toggle — shown for all professions */}
+          <button
+            onClick={() => setRemoteOnly((v) => !v)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+              remoteOnly ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-white/5 border-white/10 text-white/50 hover:border-white/25"
+            }`}
+          >
+            💻 Remote Only
+          </button>
+
+          {/* Board filter */}
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -796,14 +917,17 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
   const [tab, setTab] = useState("details");
   const [coverLetter, setCoverLetter] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [applying, setApplying] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  // Three-stage apply flow: idle → reviewing → done
+  const [applyStage, setApplyStage] = useState("idle");
 
   const board = JOB_BOARDS.find((b) => b.id === job.board) || JOB_BOARDS[0];
   const searchQuery = encodeURIComponent(`${job.title} ${job.company}`);
-  const applyUrl = `${board.url}${searchQuery}`;
+  const applyUrl = job.applyUrl || `${board.url}${searchQuery}`;
 
   const generateCoverLetter = async () => {
     setGenerating(true);
+    setTab("coverletter");
     try {
       const letter = await callClaude({
         system: "You are an expert career coach. Write concise, impactful cover letters.",
@@ -814,19 +938,19 @@ Location: ${job.location}
 Job Description: ${job.description}
 Requirements: ${(job.requirements || []).join(", ")}
 
-Candidate Profile:
+Candidate:
 Name: ${profile.name}
-Current Title: ${profile.title}
+Title: ${profile.title}
 Skills: ${(profile.skills || []).slice(0, 8).join(", ")}
 Experience: ${(profile.experience || []).map((e) => `${e.role} at ${e.company} (${e.duration})`).join("; ")}
 Key Strengths: ${(profile.keyStrengths || []).join(", ")}
 
-Write a 3-paragraph cover letter that is professional, specific, and compelling. Address it to the Hiring Manager.`,
+Write a 3-paragraph cover letter. Professional, specific, compelling. Address to Hiring Manager.`,
         maxTokens: 700,
       });
       setCoverLetter(letter);
-      setTab("coverletter");
-      showToast("Cover letter generated!", "success");
+      setApplyStage("reviewing");
+      showToast("Cover letter ready — review and edit before applying", "success");
     } catch (err) {
       showToast(`Cover letter error: ${err.message?.slice(0, 80)}`, "error");
       console.error("Cover letter error:", err);
@@ -835,23 +959,64 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
     }
   };
 
-  const autoApply = async () => {
-    if (!coverLetter) {
-      showToast("Generate a cover letter first", "warning");
-      return;
+  // Honest one-click assist: opens the real job page + copies cover letter
+  // User pastes and submits themselves — no spoofing
+  const oneClickApply = async () => {
+    if (!coverLetter) { showToast("Generate and review your cover letter first", "warning"); return; }
+
+    // 1. Copy cover letter to clipboard
+    try { await navigator.clipboard.writeText(coverLetter); } catch {}
+
+    // 2. Open the real job posting
+    window.open(applyUrl, "_blank");
+
+    // 3. Mark as applied
+    onApply("assisted");
+
+    // 4. Send real confirmation email
+    if (profile.email) {
+      setSendingEmail(true);
+      try {
+        await sendEmail({
+          toEmail: profile.email,
+          toName:  profile.name,
+          jobTitle: job.title,
+          company:  job.company,
+          board:    board.name,
+          date:     new Date().toLocaleDateString(),
+          message:  `You used JobAI's one-click assist to apply for ${job.title} at ${job.company}. Your cover letter was copied to your clipboard and the job page was opened for you to paste and submit.`,
+        });
+        showToast(`✓ Job page opened & cover letter copied! Confirmation sent to ${profile.email}`, "success");
+      } catch {
+        showToast("✓ Job page opened & cover letter copied! (Email delivery failed — check EmailJS config)", "warning");
+      } finally {
+        setSendingEmail(false);
+      }
+    } else {
+      showToast("✓ Job page opened & cover letter copied to clipboard — paste it and submit!", "success");
     }
-    setApplying(true);
-    // Simulate submission — in a real app this would use an automation service
-    await new Promise((r) => setTimeout(r, 2000));
-    setApplying(false);
-    onApply("auto");
-    showToast(`✓ Application sent to ${job.company}! Check your email for confirmation.`, "success");
+
+    setApplyStage("done");
   };
 
-  const manualApply = () => {
+  // Plain manual apply — opens job page, marks applied, sends email
+  const manualApply = async () => {
     window.open(applyUrl, "_blank");
     onApply("manual");
-    showToast(`Opening ${board.name} — we've prepared your cover letter for pasting!`, "info");
+    if (profile.email) {
+      try {
+        await sendEmail({
+          toEmail: profile.email,
+          toName:  profile.name,
+          jobTitle: job.title,
+          company:  job.company,
+          board:    board.name,
+          date:     new Date().toLocaleDateString(),
+          message:  `You opened the application for ${job.title} at ${job.company} on ${board.name}.`,
+        });
+      } catch {}
+    }
+    showToast(`Opened ${board.name} — good luck!`, "info");
   };
 
   return (
@@ -883,10 +1048,7 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
             </div>
           </div>
           <div className="text-right">
-            <div
-              className="text-2xl font-bold font-mono"
-              style={{ color: job.match >= 90 ? "#00D9FF" : job.match >= 75 ? "#A78BFA" : "#F59E0B" }}
-            >
+            <div className="text-2xl font-bold font-mono" style={{ color: job.match >= 90 ? "#00D9FF" : job.match >= 75 ? "#A78BFA" : "#F59E0B" }}>
               {job.match}%
             </div>
             <div className="text-white/30 text-xs">match score</div>
@@ -894,32 +1056,63 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
           </div>
         </div>
 
+        {/* Apply actions */}
         {applied ? (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
             ✓ You already applied to this position
           </div>
+        ) : applyStage === "done" ? (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
+            ✓ Application assisted — job page opened, cover letter copied to clipboard
+          </div>
+        ) : applyStage === "reviewing" ? (
+          // Stage 2: cover letter is ready, show final action buttons
+          <div>
+            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm mb-3">
+              ✦ Review your cover letter in the tab below, then apply
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={generateCoverLetter}
+                disabled={generating}
+                className="px-5 py-2.5 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-500/30 transition-all disabled:opacity-50"
+              >
+                {generating ? "Regenerating…" : "↺ Regenerate"}
+              </button>
+              <button
+                onClick={manualApply}
+                className="px-5 py-2.5 rounded-xl bg-white/8 border border-white/12 text-white/70 text-sm font-medium hover:bg-white/12 transition-all"
+              >
+                ↗ Open Job Page Only
+              </button>
+              <button
+                onClick={oneClickApply}
+                disabled={sendingEmail}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-black text-sm font-bold transition-all"
+                style={{ background: "linear-gradient(135deg, #00D9FF, #0EA5E9)", boxShadow: "0 0 20px rgba(0,217,255,0.3)" }}
+              >
+                {sendingEmail ? "Sending email…" : "⚡ One-Click Assist"}
+              </button>
+            </div>
+            <p className="text-white/25 text-xs mt-3">
+              ⚡ One-Click Assist opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
+            </p>
+          </div>
         ) : (
+          // Stage 1: no cover letter yet
           <div className="flex flex-wrap gap-3">
             <button
               onClick={generateCoverLetter}
               disabled={generating}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-500/30 transition-all disabled:opacity-50"
             >
-              {generating ? "✦ Generating…" : "✦ AI Cover Letter"}
+              {generating ? "✦ Generating cover letter…" : "✦ Generate AI Cover Letter"}
             </button>
             <button
               onClick={manualApply}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/8 border border-white/12 text-white/70 text-sm font-medium hover:bg-white/12 transition-all"
             >
               ↗ Apply on {board.name}
-            </button>
-            <button
-              onClick={autoApply}
-              disabled={applying || !coverLetter}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-black text-sm font-bold transition-all disabled:opacity-40"
-              style={{ background: coverLetter ? "linear-gradient(135deg, #00D9FF, #0EA5E9)" : "#444" }}
-            >
-              {applying ? "Submitting…" : "⚡ AI Auto-Apply"}
             </button>
           </div>
         )}
@@ -947,12 +1140,7 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
             <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">About the Role</h3>
             <p className="text-white/70 text-sm leading-relaxed mb-6">{job.description}</p>
             <div className="grid grid-cols-2 gap-4 text-sm">
-              {[
-                ["Industry", job.industry],
-                ["Posted", `${job.postedDays} days ago`],
-                ["Location", job.location],
-                ["Type", job.type],
-              ].map(([k, v]) => (
+              {[["Industry", job.industry], ["Posted", `${job.postedDays} days ago`], ["Location", job.location], ["Type", job.type]].map(([k, v]) => (
                 <div key={k} className="bg-white/3 rounded-xl p-3">
                   <div className="text-white/30 text-xs mb-1">{k}</div>
                   <div className="text-white/80">{v}</div>
@@ -975,34 +1163,54 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
                   </div>
                 );
               })}
+              {(job.requirements || []).length === 0 && <p className="text-white/30 text-sm">No requirements listed — check the full posting.</p>}
             </div>
           </div>
         )}
         {tab === "coverletter" && (
           <div>
-            <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">AI-Generated Cover Letter</h3>
+            <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">
+              AI Cover Letter {coverLetter && <span className="text-cyan-400 ml-1">— editable</span>}
+            </h3>
             {coverLetter ? (
               <>
                 <textarea
                   value={coverLetter}
                   onChange={(e) => setCoverLetter(e.target.value)}
-                  rows={12}
+                  rows={14}
                   className="w-full bg-white/3 border border-white/8 rounded-xl text-white/80 text-sm leading-relaxed p-4 resize-none focus:outline-none focus:border-cyan-400/30"
                   style={{ fontFamily: "'Outfit', sans-serif" }}
                 />
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => { navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success"); }} className="px-4 py-2 rounded-xl bg-white/8 text-white/60 text-sm hover:bg-white/12 transition-all">
-                    Copy
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success"); }}
+                    className="px-4 py-2 rounded-xl bg-white/8 text-white/60 text-sm hover:bg-white/12 transition-all"
+                  >
+                    📋 Copy
                   </button>
-                  <button onClick={generateCoverLetter} className="px-4 py-2 rounded-xl bg-violet-500/20 text-violet-300 text-sm hover:bg-violet-500/30 transition-all">
-                    Regenerate
+                  <button
+                    onClick={generateCoverLetter}
+                    disabled={generating}
+                    className="px-4 py-2 rounded-xl bg-violet-500/20 text-violet-300 text-sm hover:bg-violet-500/30 transition-all disabled:opacity-50"
+                  >
+                    {generating ? "Regenerating…" : "↺ Regenerate"}
                   </button>
+                  {applyStage === "reviewing" && (
+                    <button
+                      onClick={oneClickApply}
+                      disabled={sendingEmail}
+                      className="ml-auto px-4 py-2 rounded-xl text-black text-sm font-bold"
+                      style={{ background: "linear-gradient(135deg, #00D9FF, #0EA5E9)" }}
+                    >
+                      {sendingEmail ? "Sending…" : "⚡ Apply Now"}
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
               <div className="text-center py-8 text-white/30">
                 <div className="text-3xl mb-3">✦</div>
-                <p className="text-sm mb-4">Click "AI Cover Letter" to generate a personalised letter</p>
+                <p className="text-sm mb-4">Generate a cover letter to see it here — you can edit it before applying</p>
                 <button
                   onClick={generateCoverLetter}
                   disabled={generating}
@@ -1021,7 +1229,7 @@ Write a 3-paragraph cover letter that is professional, specific, and compelling.
 
 // ─── TRACKER PANEL ────────────────────────────────────────────────────────────
 function TrackerPanel({ applications, onClose }) {
-  const statuses = { manual: "Submitted", auto: "Auto-Applied" };
+  const statuses = { manual: "Opened listing", assisted: "One-click assisted" };
   return (
     <div
       className="fixed inset-0 z-40 flex justify-end"
@@ -1063,11 +1271,15 @@ function TrackerPanel({ applications, onClose }) {
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
+// Tiny localStorage helpers
+const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+const load = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
+
 export default function App() {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => load("jobai_step", 0));
   const [uploadData, setUploadData] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [applications, setApplications] = useState([]);
+  const [profile, setProfile] = useState(() => load("jobai_profile", null));
+  const [applications, setApplications] = useState(() => load("jobai_applications", []));
   const [showTracker, setShowTracker] = useState(false);
 
   const handleUpload = (data) => {
@@ -1079,13 +1291,17 @@ export default function App() {
   const handleParsed = (parsedProfile) => {
     if (!parsedProfile) { setStep(0); return; }
     setProfile(parsedProfile);
+    save("jobai_profile", parsedProfile);
     setStep(2);
+    save("jobai_step", 2);
     showToast(`Profile built for ${parsedProfile.name || "you"}!`, "success");
   };
 
   const handleProfileDone = (p) => {
     setProfile(p);
+    save("jobai_profile", p);
     setStep(3);
+    save("jobai_step", 3);
     showToast("Finding your best job matches…", "info");
   };
 
@@ -1096,12 +1312,24 @@ export default function App() {
       method,
       date: new Date().toLocaleDateString(),
       board: job.board,
+      applyUrl: job.applyUrl || "",
     };
     setApplications((prev) => {
       const updated = [app, ...prev];
+      save("jobai_applications", updated);
       if (updated.length === 1) showToast("Application tracker updated!", "info");
       return updated;
     });
+  };
+
+  // Let user start fresh — clears everything
+  const handleReset = () => {
+    ["jobai_step", "jobai_profile", "jobai_applications"].forEach((k) => localStorage.removeItem(k));
+    setStep(0);
+    setProfile(null);
+    setApplications([]);
+    setUploadData(null);
+    showToast("Started fresh — upload a new CV anytime.", "info");
   };
 
   return (
@@ -1152,6 +1380,14 @@ export default function App() {
                 </span>
               ))}
             </div>
+            {step > 0 && (
+              <button
+                onClick={handleReset}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-white/4 border border-white/8 hover:border-red-400/30 text-white/30 hover:text-red-400"
+              >
+                ↺ Fresh Start
+              </button>
+            )}
             <button
               onClick={() => setShowTracker(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-white/6 border border-white/10 hover:border-white/25 text-white/60 hover:text-white"
@@ -1169,6 +1405,8 @@ export default function App() {
           {step === 1 && uploadData && (
             <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} />
           )}
+          {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
+          {step === 1 && !uploadData && <UploadStep onNext={handleUpload} />}
           {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
           {step === 3 && profile && (
             <JobsStep
@@ -1176,6 +1414,8 @@ export default function App() {
               onApply={(job, method) => handleApply(job, method)}
             />
           )}
+          {/* If step=2 or 3 but profile lost somehow, go back to upload */}
+          {(step === 2 || step === 3) && !profile && <UploadStep onNext={handleUpload} />}
         </main>
 
         {/* Footer */}
