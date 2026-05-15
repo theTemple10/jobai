@@ -1,23 +1,54 @@
 # JobAI — AI-Powered Job Application Platform
 
-Upload your CV → AI parses it → Get matched jobs → Apply with one click.
+> Upload your CV → AI parses it → Get matched jobs → Apply in one click.
+
+Live demo: **[jobai-orpin.vercel.app](https://jobai-orpin.vercel.app)**
+
+---
 
 ## Features
-- CV Parsing (PDF/image) via Claude AI
-- 12+ AI-ranked job listings per profile
-- One-click AI cover letter generation
-- Auto Apply + Manual Apply modes
-- Remote/Freelance mode for eligible professions
-- Application tracker with toast notifications
+
+- **CV Parsing** — Upload a PDF or image; AI extracts your skills, experience, and role
+- **Job Matching** — 12+ real, ranked job listings pulled from JSearch (RapidAPI)
+- **AI Cover Letters** — One-click generation tailored to each job posting
+- **Apply Flow** — Opens the job page and copies your cover letter to clipboard
+- **Remote / Freelance Mode** — Toggle for eligible professions
+- **Application Tracker** — Track applied jobs with live toast notifications
+- **Email Notifications** — Get a copy of your cover letter via EmailJS
+
+---
 
 ## Tech Stack
-React 18 + Vite · Tailwind CSS v3 · Anthropic Claude API
+
+| Layer | Tool |
+|---|---|
+| Frontend | React 18 + Vite, Tailwind CSS v3 |
+| AI (text) | Groq API — `llama-3.3-70b-versatile` |
+| AI (vision / CV parsing) | Groq API — `llama-4-scout` |
+| Job listings | JSearch via RapidAPI |
+| Email | EmailJS |
+| PDF parsing | PDF.js (CDN, dynamically loaded) |
+| Backend proxy | Vercel serverless functions (`/api/`) |
+| Deployment | Vercel |
+
+---
+
+## Architecture: Secure Backend Proxy
+
+API keys are **never exposed in the browser bundle**. All external API calls go through Vercel serverless functions:
+
+```
+Browser → /api/groq.js   → Groq API     (AI text + vision)
+Browser → /api/jobs.js   → JSearch API  (job listings)
+```
+
+The `api/` folder lives at the project root and is automatically deployed as serverless functions by Vercel.
 
 ---
 
 ## Quick Start (Local)
 
-Prerequisites: Node.js 18+, Anthropic API key (console.anthropic.com)
+**Prerequisites:** Node.js 18+, Groq API key (console.groq.com — free, no card required), JSearch key (rapidapi.com)
 
 ```bash
 npm install
@@ -25,8 +56,14 @@ npm install
 
 Create `.env.local`:
 ```
-VITE_ANTHROPIC_API_KEY=sk-ant-your-key-here
+GROQ_API_KEY=your-groq-key-here
+JSEARCH_KEY=your-jsearch-key-here
+EMAILJS_SERVICE_ID=your-service-id
+EMAILJS_TEMPLATE_ID=your-template-id
+EMAILJS_PUBLIC_KEY=your-public-key
 ```
+
+> ⚠️ Note: `GROQ_API_KEY` and `JSEARCH_KEY` have **no** `VITE_` prefix — they are server-side only and never sent to the browser.
 
 ```bash
 npm run dev
@@ -35,79 +72,70 @@ npm run dev
 
 ---
 
-## Deploy to Vercel (Recommended — Free, ~2 minutes)
+## Deploy to Vercel
 
 ### 1. Push to GitHub
+
 ```bash
-git init
 git add .
-git commit -m "Initial commit"
-# Create repo on github.com first, then:
-git remote add origin https://github.com/YOUR_USERNAME/jobai.git
-git push -u origin main
+git commit -m "your message"
+git push origin main
 ```
 
 ### 2. Import on Vercel
-1. Go to vercel.com → Sign in with GitHub (free)
-2. Click "Add New Project"
-3. Select your `jobai` repo → Click "Import"
 
-### 3. Set Environment Variable
-Before clicking Deploy, scroll to "Environment Variables":
-- Name: `VITE_ANTHROPIC_API_KEY`
-- Value: `sk-ant-your-key-here`
-- Apply to: Production + Preview + Development
+1. Go to [vercel.com](https://vercel.com) → Sign in with GitHub
+2. Click **Add New Project** → select your `jobai` repo → **Import**
 
-### 4. Click Deploy
-Done. Live at `https://jobai-YOUR_USERNAME.vercel.app` in ~30 seconds.
-Every future `git push` auto-redeploys.
+### 3. Set Environment Variables
 
----
+Before clicking Deploy, scroll to **Environment Variables** and add:
 
-## Deploy to Netlify (Alternative — Also Free)
+| Name | Value | Notes |
+|---|---|---|
+| `GROQ_API_KEY` | `your-groq-key` | No `VITE_` prefix — server-side |
+| `JSEARCH_KEY` | `your-jsearch-key` | No `VITE_` prefix — server-side |
+| `EMAILJS_SERVICE_ID` | `your-service-id` | Client-safe, add `VITE_` if accessing in frontend |
+| `EMAILJS_TEMPLATE_ID` | `your-template-id` | Same as above |
+| `EMAILJS_PUBLIC_KEY` | `your-public-key` | Same as above |
 
-### Option A: Drag & Drop (Fastest, no Git needed)
-```bash
-npm run build
-```
-Go to app.netlify.com → drag the `dist/` folder onto the dashboard.
-Then: Site Settings → Environment Variables → add `VITE_ANTHROPIC_API_KEY`.
-Trigger a redeploy to apply the key.
+Apply each to: **Production + Preview + Development**.
 
-### Option B: Git-based (auto-deploy on push)
-1. Connect GitHub repo in Netlify
-2. Build command: `npm run build`
-3. Publish directory: `dist`
-4. Add `VITE_ANTHROPIC_API_KEY` under Site Settings → Environment Variables
-5. Every push to `main` auto-deploys
+### 4. Deploy
+
+Click **Deploy**. Live in ~30 seconds. Every future `git push` auto-redeploys.
 
 ---
 
-## Custom Domain
+## Getting Your API Keys
 
-Vercel: Project → Settings → Domains → add domain → update DNS at your registrar.
-Netlify: Site Settings → Domain Management → Add custom domain.
-Both auto-issue free SSL certificates.
+### Groq (AI — Free, No Card Required)
+1. Visit [console.groq.com](https://console.groq.com)
+2. Sign up → API Keys → Create Key
+3. Works globally, including Nigeria ✓
+
+### JSearch (Job Listings)
+1. Visit [rapidapi.com/letscrape-6bfat3ri3r](https://rapidapi.com/letscrape-6bfat3ri3r/api/jsearch)
+2. Subscribe to the free tier
+3. Copy your RapidAPI key
+
+### EmailJS (Email Notifications)
+1. Visit [emailjs.com](https://emailjs.com)
+2. Create a service and email template
+3. Copy your Service ID, Template ID, and Public Key
 
 ---
 
-## Getting Your Anthropic API Key
+## Cost
 
-1. Visit console.anthropic.com
-2. Go to API Keys → Create Key
-3. Copy it (starts with sk-ant-...)
-4. Paste into .env.local or your host's env variable UI
+| Service | Cost |
+|---|---|
+| Groq API | **Free** (generous rate limits, no card) |
+| JSearch | **Free** tier available (10 req/month on basic) |
+| EmailJS | **Free** tier (200 emails/month) |
+| Vercel | **Free** (Hobby plan) |
 
-Cost: ~$0.01–$0.03 per CV parse + job match session using claude-sonnet-4.
-
----
-
-## Security Note for Public Apps
-
-The VITE_ prefix exposes the key in the client bundle — fine for personal use.
-For a public app, add a backend proxy:
-- Vercel: create `/api/claude.js` serverless function to hold the key server-side
-- Add rate limiting to prevent abuse
+Running this app costs **$0** on the free tiers.
 
 ---
 
@@ -115,18 +143,39 @@ For a public app, add a backend proxy:
 
 | Problem | Solution |
 |---|---|
-| Blank page after deploy | Check env var starts with VITE_ |
-| API key error | Verify .env.local exists with correct key |
-| Build fails | Run npm install then npm run build |
-| CV not parsing | File must be under 10MB, PDF or image |
+| Jobs not loading | Verify `JSEARCH_KEY` is set in Vercel without `VITE_` prefix |
+| AI not responding | Check `GROQ_API_KEY` is set correctly (server-side) |
+| Blank page after deploy | Check browser console for errors |
+| CV not parsing | File must be under 10MB, PDF or image format |
+| Email not sending | Confirm all three EmailJS variables are set |
+| `api/` routes returning 404 locally | Use `vercel dev` instead of `npm run dev` for local proxy testing |
 
 ---
 
 ## Customisation
 
-- Add job boards: edit JOB_BOARDS array in App.jsx
-- Change AI model: edit MODEL constant in App.jsx
-- Persist data: swap useState for localStorage
-- Add auth: wrap App with Clerk or Supabase Auth
+- **Add job boards** — edit the `JOB_BOARDS` array in `App.jsx`
+- **Swap AI model** — edit the `MODEL` constant in `App.jsx` (see [Groq model list](https://console.groq.com/docs/models))
+- **Persist data** — replace `useState` with `localStorage` or a database
+- **Add user accounts** — wrap `App` with Clerk or Supabase Auth
+
+---
+
+## Project Structure
+
+```
+jobai/
+├── api/
+│   ├── groq.js          # Serverless proxy → Groq API
+│   └── jobs.js          # Serverless proxy → JSearch API
+├── src/
+│   └── App.jsx          # Main React app
+├── public/
+├── .env.local           # Local secrets (never committed)
+├── vercel.json          # Vercel config (if needed)
+└── package.json
+```
+
+---
 
 MIT License
