@@ -18,6 +18,10 @@ const JOB_BOARDS = [
   { id: "remoteok", name: "RemoteOK", icon: "rk", color: "#00C853", url: "https://remoteok.com/remote-" },
   { id: "wellfound", name: "Wellfound", icon: "wf", color: "#FB4F14", url: "https://wellfound.com/jobs?q=" },
   { id: "weworkremotely", name: "We Work Remotely", icon: "wr", color: "#4A90D9", url: "https://weworkremotely.com/remote-jobs/search?term=" },
+  // Fallback for any publisher JSearch returns that isn't one of the boards
+  // above (ZipRecruiter, Trabajo.org, a company's own careers page, etc.)
+  // — never silently mislabel these as Indeed.
+  { id: "other", name: "Company Site", icon: "co", color: "#6366F1", url: "https://www.google.com/search?q=" },
 ];
 
 const REMOTE_PROFESSIONS = [
@@ -56,6 +60,24 @@ async function extractPdfText(file) {
     fullText += content.items.map((item) => item.str).join(" ") + "\n";
   }
   return fullText.trim();
+}
+
+// Loads Mammoth.js from CDN and extracts all text from a .docx file.
+// Legacy .doc (pre-2007 binary format) is intentionally not supported —
+// it isn't reliably parseable client-side.
+async function extractDocxText(file) {
+  if (!window.mammoth) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js";
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await window.mammoth.extractRawText({ arrayBuffer });
+  return (result.value || "").trim();
 }
 
 // For image CVs: convert to base64 for vision model
@@ -99,7 +121,7 @@ function ToastContainer() {
   const colors = {
     success: "border-emerald-500 bg-emerald-500/10 text-emerald-300",
     error: "border-red-500 bg-red-500/10 text-red-300",
-    info: "border-cyan-500 bg-cyan-500/10 text-cyan-300",
+    info: "border-indigo-500 bg-indigo-500/10 text-indigo-300",
     warning: "border-amber-500 bg-amber-500/10 text-amber-300",
   };
 
@@ -198,17 +220,17 @@ function StepIndicator({ current }) {
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500 ${
                 i < current
-                  ? "bg-cyan-500 text-black"
+                  ? "bg-indigo-500 text-black"
                   : i === current
-                  ? "bg-cyan-400/20 border-2 border-cyan-400 text-cyan-400"
-                  : "bg-white/5 border border-white/10 text-white/30"
+                  ? "bg-indigo-400/20 border-2 border-indigo-400 text-indigo-400"
+                  : "bg-ink/5 border border-ink/10 text-ink/30"
               }`}
             >
               {i < current ? "✓" : i + 1}
             </div>
             <span
               className={`text-xs whitespace-nowrap transition-colors duration-300 ${
-                i === current ? "text-cyan-400" : i < current ? "text-cyan-600" : "text-white/20"
+                i === current ? "text-indigo-400" : i < current ? "text-indigo-600" : "text-ink/20"
               }`}
             >
               {s}
@@ -217,7 +239,7 @@ function StepIndicator({ current }) {
           {i < STEPS.length - 1 && (
             <div
               className="h-px w-10 mx-1 mt-[-10px] transition-colors duration-500"
-              style={{ background: i < current ? "#22d3ee" : "rgba(255,255,255,0.08)" }}
+              style={{ background: i < current ? "#818CF8" : "var(--border-soft)" }}
             />
           )}
         </div>
@@ -233,10 +255,19 @@ function UploadStep({ onNext }) {
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef();
 
+  const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
   const handleFile = (f) => {
     if (!f) return;
-    const valid = ["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(f.type);
-    if (!valid) { showToast("Please upload a PDF or image file", "error"); return; }
+    const validType = ["application/pdf", DOCX_TYPE, "image/png", "image/jpeg", "image/webp"].includes(f.type);
+    // Some browsers/OSes report an empty or generic MIME type for .docx —
+    // fall back to the file extension so those uploads aren't rejected.
+    const validExt = /\.(pdf|docx|png|jpe?g|webp)$/i.test(f.name);
+    if (f.name.toLowerCase().endsWith(".doc")) {
+      showToast("Legacy .doc isn't supported — please save as .docx or PDF", "error");
+      return;
+    }
+    if (!validType && !validExt) { showToast("Please upload a PDF, Word (.docx), or image file", "error"); return; }
     setFile(f);
     showToast(`${f.name} ready for analysis`, "success");
   };
@@ -250,13 +281,13 @@ function UploadStep({ onNext }) {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="text-center mb-10">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 text-xs font-mono mb-4">
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-400/10 border border-indigo-400/20 text-indigo-400 text-xs font-mono mb-4">
           STEP 01 / UPLOAD YOUR CV
         </div>
-        <h2 className="text-4xl font-bold text-white mb-3" style={{ fontFamily: "'Playfair Display', serif" }}>
+        <h2 className="text-4xl font-bold text-ink mb-3" style={{ fontFamily: "'Playfair Display', serif" }}>
           Start Your Job Search
         </h2>
-        <p className="text-white/50 text-sm leading-relaxed max-w-md mx-auto">
+        <p className="text-ink/50 text-sm leading-relaxed max-w-md mx-auto">
           Upload your CV and our AI will extract your skills, experience, and suggest the best-matched jobs across top boards.
         </p>
       </div>
@@ -264,7 +295,7 @@ function UploadStep({ onNext }) {
       {/* Drop Zone */}
       <div
         className={`relative rounded-2xl border-2 border-dashed transition-all duration-300 cursor-pointer mb-6 ${
-          dragging ? "border-cyan-400 bg-cyan-400/5 scale-[1.01]" : file ? "border-cyan-500/50 bg-cyan-500/5" : "border-white/10 hover:border-white/25 bg-white/3"
+          dragging ? "border-indigo-400 bg-indigo-400/5 scale-[1.01]" : file ? "border-indigo-500/50 bg-indigo-500/5" : "border-ink/10 hover:border-ink/25 bg-ink/3"
         }`}
         style={{ padding: "3rem 2rem" }}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -272,19 +303,19 @@ function UploadStep({ onNext }) {
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
       >
-        <input ref={fileRef} type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
+        <input ref={fileRef} type="file" accept=".pdf,.docx,image/*" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
         <div className="text-center">
           {file ? (
             <>
               <div className="text-5xl mb-3">📄</div>
-              <div className="text-white font-semibold text-lg">{file.name}</div>
-              <div className="text-white/40 text-sm mt-1">{(file.size / 1024).toFixed(0)} KB · Click to replace</div>
+              <div className="text-ink font-semibold text-lg">{file.name}</div>
+              <div className="text-ink/40 text-sm mt-1">{(file.size / 1024).toFixed(0)} KB · Click to replace</div>
             </>
           ) : (
             <>
               <div className="text-5xl mb-4 opacity-40">⬆</div>
-              <div className="text-white/70 font-semibold text-lg mb-1">Drop your CV here</div>
-              <div className="text-white/30 text-sm">PDF, PNG, JPG supported · Max 10MB</div>
+              <div className="text-ink/70 font-semibold text-lg mb-1">Drop your CV here</div>
+              <div className="text-ink/30 text-sm">PDF, Word (.docx), PNG, JPG supported · Max 10MB</div>
             </>
           )}
         </div>
@@ -292,7 +323,7 @@ function UploadStep({ onNext }) {
 
       {/* Optional Prompt */}
       <div className="mb-6">
-        <label className="block text-white/60 text-xs font-mono mb-2 uppercase tracking-widest">
+        <label className="block text-ink/60 text-xs font-mono mb-2 uppercase tracking-widest">
           Additional Context (Optional)
         </label>
         <textarea
@@ -300,7 +331,7 @@ function UploadStep({ onNext }) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="e.g. I'm looking for senior roles in fintech, prefer remote, open to relocation to London or Berlin..."
-          className="w-full rounded-xl border border-white/10 bg-white/5 text-white placeholder-white/20 text-sm px-4 py-3 resize-none focus:outline-none focus:border-cyan-400/50 focus:bg-white/8 transition-all"
+          className="w-full rounded-xl border border-ink/10 bg-ink/5 text-ink placeholder-ink/20 text-sm px-4 py-3 resize-none focus:outline-none focus:border-indigo-400/50 focus:bg-ink/8 transition-all"
           style={{ fontFamily: "'Outfit', sans-serif" }}
         />
       </div>
@@ -310,8 +341,8 @@ function UploadStep({ onNext }) {
         onClick={() => onNext({ file, prompt })}
         className="w-full py-4 rounded-xl font-bold text-black text-base transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
         style={{
-          background: file ? "linear-gradient(135deg, #00D9FF, #0EA5E9)" : "#555",
-          boxShadow: file ? "0 0 30px rgba(0,217,255,0.3)" : "none",
+          background: file ? "linear-gradient(135deg, #6366F1, #4F46E5)" : "var(--bg-disabled)",
+          boxShadow: file ? "0 0 30px rgba(99,102,241,0.3)" : "none",
           fontFamily: "'Outfit', sans-serif",
         }}
       >
@@ -351,6 +382,8 @@ function ParsingStep({ file, prompt, onDone }) {
     (async () => {
       try {
         const isImage = file.type.startsWith("image/");
+        const isDocx = file.name.toLowerCase().endsWith(".docx") ||
+          file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         let userContent;
 
         if (isImage) {
@@ -381,10 +414,17 @@ function ParsingStep({ file, prompt, onDone }) {
 Additional context: ${prompt || "None provided"}` },
           ];
         } else {
-          // PDF → extract text client-side with PDF.js, send as plain text
-          setStatus("Extracting text from PDF…");
-          const cvText = await extractPdfText(file);
-          if (!cvText || cvText.length < 50) throw new Error("Could not extract text from PDF. Please try saving it as an image (PNG) and uploading that instead.");
+          // PDF or DOCX → extract text client-side, send as plain text
+          let cvText;
+          if (isDocx) {
+            setStatus("Extracting text from Word document…");
+            cvText = await extractDocxText(file);
+            if (!cvText || cvText.length < 50) throw new Error("Could not extract text from this Word document. Please try saving it as a PDF and uploading that instead.");
+          } else {
+            setStatus("Extracting text from PDF…");
+            cvText = await extractPdfText(file);
+            if (!cvText || cvText.length < 50) throw new Error("Could not extract text from PDF. Please try saving it as an image (PNG) and uploading that instead.");
+          }
           userContent = [
             {
               type: "text",
@@ -451,26 +491,26 @@ Additional context: ${prompt || "None provided"}`,
     <div className="max-w-lg mx-auto text-center py-16">
       <div className="relative w-24 h-24 mx-auto mb-8">
         <svg className="w-24 h-24 -rotate-90" viewBox="0 0 96 96">
-          <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="6" />
+          <circle cx="48" cy="48" r="40" fill="none" style={{ stroke: "var(--border-soft)" }} strokeWidth="6" />
           <circle
-            cx="48" cy="48" r="40" fill="none" stroke="#00D9FF" strokeWidth="6"
+            cx="48" cy="48" r="40" fill="none" stroke="#6366F1" strokeWidth="6"
             strokeDasharray={`${2 * Math.PI * 40}`}
             strokeDashoffset={`${2 * Math.PI * 40 * (1 - progress / 100)}`}
             strokeLinecap="round"
             style={{ transition: "stroke-dashoffset 0.5s ease" }}
           />
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center text-cyan-400 font-bold font-mono text-lg">
+        <div className="absolute inset-0 flex items-center justify-center text-indigo-400 font-bold font-mono text-lg">
           {progress}%
         </div>
       </div>
-      <div className="text-white font-semibold text-xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>
+      <div className="text-ink font-semibold text-xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>
         AI is Reading Your CV
       </div>
-      <div className="text-white/40 text-sm font-mono animate-pulse">{status}</div>
+      <div className="text-ink/40 text-sm font-mono animate-pulse">{status}</div>
       <div className="mt-8 flex justify-center gap-2">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="w-2 h-2 rounded-full bg-cyan-400" style={{ animation: `bounce 1.2s ${i * 0.2}s infinite` }} />
+          <div key={i} className="w-2 h-2 rounded-full bg-indigo-400" style={{ animation: `bounce 1.2s ${i * 0.2}s infinite` }} />
         ))}
       </div>
     </div>
@@ -483,33 +523,33 @@ function ProfileStep({ profile, onNext }) {
   const remote = isRemoteEligible(p.title, p.skills);
 
   const Tag = ({ label, onRemove }) => (
-    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/8 border border-white/10 text-white/70 text-xs">
+    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-ink/8 border border-ink/10 text-ink/70 text-xs">
       {label}
-      {onRemove && <button onClick={onRemove} className="text-white/30 hover:text-red-400 transition-colors ml-1">×</button>}
+      {onRemove && <button onClick={onRemove} className="text-ink/30 hover:text-red-400 transition-colors ml-1">×</button>}
     </span>
   );
 
   return (
     <div className="max-w-3xl mx-auto">
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 text-xs font-mono mb-3">
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-400/10 border border-indigo-400/20 text-indigo-400 text-xs font-mono mb-3">
           STEP 03 / YOUR PROFILE
         </div>
-        <h2 className="text-3xl font-bold text-white" style={{ fontFamily: "'Playfair Display', serif" }}>
+        <h2 className="text-3xl font-bold text-ink" style={{ fontFamily: "'Playfair Display', serif" }}>
           AI-Extracted Profile
         </h2>
-        <p className="text-white/40 text-sm mt-2">Review and edit before we find your matches</p>
+        <p className="text-ink/40 text-sm mt-2">Review and edit before we find your matches</p>
       </div>
 
       {/* Header Card */}
       <div
         className="rounded-2xl p-6 mb-6 relative overflow-hidden"
-        style={{ background: "linear-gradient(135deg, rgba(0,217,255,0.08), rgba(124,58,237,0.08))", border: "1px solid rgba(0,217,255,0.15)" }}
+        style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.08), rgba(124,58,237,0.08))", border: "1px solid rgba(99,102,241,0.15)" }}
       >
         <div className="flex flex-wrap items-start gap-4">
           <div
             className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-black flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #00D9FF, #7C3AED)" }}
+            style={{ background: "linear-gradient(135deg, #6366F1, #7C3AED)" }}
           >
             {(p.name || "?").charAt(0)}
           </div>
@@ -517,17 +557,17 @@ function ProfileStep({ profile, onNext }) {
             <input
               value={p.name || ""}
               onChange={(e) => setP({ ...p, name: e.target.value })}
-              className="text-xl font-bold text-white bg-transparent border-none outline-none w-full"
+              className="text-xl font-bold text-ink bg-transparent border-none outline-none w-full"
               placeholder="Your Name"
               style={{ fontFamily: "'Playfair Display', serif" }}
             />
             <input
               value={p.title || ""}
               onChange={(e) => setP({ ...p, title: e.target.value })}
-              className="text-cyan-400 text-sm bg-transparent border-none outline-none w-full"
+              className="text-indigo-400 text-sm bg-transparent border-none outline-none w-full"
               placeholder="Job Title"
             />
-            <div className="flex flex-wrap gap-3 mt-2 text-white/40 text-xs">
+            <div className="flex flex-wrap gap-3 mt-2 text-ink/40 text-xs">
               {p.email && <span>✉ {p.email}</span>}
               {p.location && <span>📍 {p.location}</span>}
               {p.seniority && <span className="px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-300">{p.seniority}</span>}
@@ -536,22 +576,22 @@ function ProfileStep({ profile, onNext }) {
           </div>
           {p.salaryExpectation && (
             <div className="text-right">
-              <div className="text-white/30 text-xs">Est. Salary Range</div>
-              <div className="text-cyan-400 font-mono font-bold">{p.salaryExpectation}</div>
+              <div className="text-ink/30 text-xs">Est. Salary Range</div>
+              <div className="text-indigo-400 font-mono font-bold">{p.salaryExpectation}</div>
             </div>
           )}
         </div>
         {p.summary && (
-          <div className="mt-4 pt-4 border-t border-white/8">
-            <p className="text-white/60 text-sm leading-relaxed">{p.summary}</p>
+          <div className="mt-4 pt-4 border-t border-ink/8">
+            <p className="text-ink/60 text-sm leading-relaxed">{p.summary}</p>
           </div>
         )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {/* Skills */}
-        <div className="rounded-2xl p-5 bg-white/3 border border-white/8">
-          <div className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">Skills</div>
+        <div className="rounded-2xl p-5 bg-ink/3 border border-ink/8">
+          <div className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">Skills</div>
           <div className="flex flex-wrap gap-2">
             {(p.skills || []).map((s, i) => (
               <Tag key={i} label={s} onRemove={() => setP({ ...p, skills: p.skills.filter((_, j) => j !== i) })} />
@@ -560,12 +600,12 @@ function ProfileStep({ profile, onNext }) {
         </div>
 
         {/* Key Strengths */}
-        <div className="rounded-2xl p-5 bg-white/3 border border-white/8">
-          <div className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">Key Strengths</div>
+        <div className="rounded-2xl p-5 bg-ink/3 border border-ink/8">
+          <div className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">Key Strengths</div>
           <div className="flex flex-col gap-2">
             {(p.keyStrengths || []).map((s, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm text-white/70">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0" />
+              <div key={i} className="flex items-center gap-2 text-sm text-ink/70">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
                 {s}
               </div>
             ))}
@@ -575,17 +615,17 @@ function ProfileStep({ profile, onNext }) {
 
       {/* Experience */}
       {p.experience?.length > 0 && (
-        <div className="rounded-2xl p-5 bg-white/3 border border-white/8 mb-4">
-          <div className="text-white/50 text-xs font-mono uppercase tracking-widest mb-4">Experience</div>
+        <div className="rounded-2xl p-5 bg-ink/3 border border-ink/8 mb-4">
+          <div className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-4">Experience</div>
           <div className="space-y-4">
             {p.experience.map((exp, i) => (
               <div key={i} className="flex gap-3">
-                <div className="w-px bg-cyan-400/20 flex-shrink-0" />
+                <div className="w-px bg-indigo-400/20 flex-shrink-0" />
                 <div>
-                  <div className="text-white font-semibold text-sm">{exp.role}</div>
-                  <div className="text-cyan-400/70 text-xs">{exp.company} · {exp.duration}</div>
+                  <div className="text-ink font-semibold text-sm">{exp.role}</div>
+                  <div className="text-indigo-400/70 text-xs">{exp.company} · {exp.duration}</div>
                   {exp.highlights?.length > 0 && (
-                    <div className="text-white/40 text-xs mt-1">{exp.highlights[0]}</div>
+                    <div className="text-ink/40 text-xs mt-1">{exp.highlights[0]}</div>
                   )}
                 </div>
               </div>
@@ -595,11 +635,11 @@ function ProfileStep({ profile, onNext }) {
       )}
 
       {/* Job Titles to Search */}
-      <div className="rounded-2xl p-5 bg-cyan-400/5 border border-cyan-400/15 mb-6">
-        <div className="text-cyan-400 text-xs font-mono uppercase tracking-widest mb-3">Will Search For</div>
+      <div className="rounded-2xl p-5 bg-indigo-400/5 border border-indigo-400/15 mb-6">
+        <div className="text-indigo-400 text-xs font-mono uppercase tracking-widest mb-3">Will Search For</div>
         <div className="flex flex-wrap gap-2">
           {(p.jobTitles || []).map((t, i) => (
-            <span key={i} className="px-3 py-1 rounded-full bg-cyan-400/15 border border-cyan-400/25 text-cyan-300 text-xs font-mono">
+            <span key={i} className="px-3 py-1 rounded-full bg-indigo-400/15 border border-indigo-400/25 text-indigo-300 text-xs font-mono">
               {t}
             </span>
           ))}
@@ -610,8 +650,8 @@ function ProfileStep({ profile, onNext }) {
         onClick={() => onNext(p)}
         className="w-full py-4 rounded-xl font-bold text-black text-base"
         style={{
-          background: "linear-gradient(135deg, #00D9FF, #0EA5E9)",
-          boxShadow: "0 0 30px rgba(0,217,255,0.3)",
+          background: "linear-gradient(135deg, #6366F1, #4F46E5)",
+          boxShadow: "0 0 30px rgba(99,102,241,0.3)",
           fontFamily: "'Outfit', sans-serif",
         }}
       >
@@ -624,20 +664,23 @@ function ProfileStep({ profile, onNext }) {
 // ─── STEP 3: JOBS ─────────────────────────────────────────────────────────────
 function JobsStep({ profile, onApply }) {
   const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);     // only the very first load — full-page spinner
+  const [searching, setSearching] = useState(false); // subsequent re-searches — keeps old results visible
   const [filter, setFilter] = useState("all");
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [location, setLocation] = useState("all");
   const [applied, setApplied] = useState({});
   const [selected, setSelected] = useState(null);
   const done = useRef(false);
+  const cache = useRef(new Map());  // location -> normalised jobs[], so re-visiting a location is instant
+  const abortRef = useRef(null);    // cancels a stale in-flight search when a newer one starts
 
   const remote = isRemoteEligible(profile.title, profile.skills);
 
   useEffect(() => {
     if (done.current) return;
     done.current = true;
-    generateJobs();
+    generateJobs("all");
   }, []);
 
   // Normalise a raw JSearch result into our app's job shape
@@ -646,8 +689,14 @@ function JobsStep({ profile, onApply }) {
       linkedin: "linkedin", indeed: "indeed", glassdoor: "glassdoor",
       remoteok: "remoteok", wellfound: "wellfound", weworkremotely: "weworkremotely",
     };
-    const sourceRaw = (item.job_publisher || "indeed").toLowerCase();
-    const board = Object.keys(boardMap).find((k) => sourceRaw.includes(k)) || "indeed";
+    // Only claim a known board when the publisher name actually matches —
+    // never default unmatched sources (ZipRecruiter, a company's own careers
+    // page, Trabajo.org, etc.) to "Indeed". Show their real name instead.
+    const rawPublisher = (item.job_publisher || "").trim();
+    const sourceRaw = rawPublisher.toLowerCase();
+    const matchedBoard = Object.keys(boardMap).find((k) => sourceRaw.includes(k));
+    const board = matchedBoard || "other";
+    const boardLabel = matchedBoard ? null : (rawPublisher || "Company Site");
     const isRemote = item.job_is_remote || false;
     const postedTs = item.job_posted_at_timestamp;
     const postedDays = postedTs
@@ -675,6 +724,7 @@ function JobsStep({ profile, onApply }) {
         : item.job_salary_period ? `${item.job_salary_currency || ""}${item.job_min_salary || ""}${item.job_salary_period}` : "Salary not listed",
       match,
       board,
+      boardLabel,
       applyUrl: item.job_apply_link || "",
       description: item.job_description
         ? item.job_description.slice(0, 180).trim() + "…"
@@ -690,34 +740,57 @@ function JobsStep({ profile, onApply }) {
     };
   };
 
-  const generateJobs = async () => {
+  const generateJobs = async (loc) => {
+    // Instant path: we've already fetched this exact location this session
+    if (cache.current.has(loc)) {
+      setJobs(cache.current.get(loc));
+      setLoading(false);
+      setSearching(false);
+      return;
+    }
+
+    // Cancel a still-in-flight search so a slow older response can never
+    // clobber a newer one (e.g. rapidly switching locations)
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     // Build search queries from profile job titles
     const queries = (profile.jobTitles || [profile.title]).slice(0, 3);
-    const locationQuery = location !== "all" ? ` in ${location}` : "";
+    const isRemoteLocation = loc === "Remote";
+    // "Remote" isn't a real place — asking JSearch to geocode "in Remote"
+    // returns poor/empty results. Use its dedicated remote filter instead.
+    const locationQuery = loc !== "all" && !isRemoteLocation ? ` in ${loc}` : "";
+    const remoteParam = isRemoteLocation ? "&remote_jobs_only=true" : "";
 
-    // Add remote query if eligible
     const remoteEligible = isRemoteEligible(profile.title, profile.skills);
-    if (remoteEligible) queries.push(`${profile.title} remote`);
+    if (remoteEligible && !isRemoteLocation) queries.push(`${profile.title} remote`);
 
     try {
-
       // Fetch results for each query in parallel via our secure proxy
       const results = await Promise.allSettled(
         queries.map((q) =>
-          fetch(`${PROXY_JOBS}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month`).then((r) => r.json())
+          fetch(`${PROXY_JOBS}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month${remoteParam}`, {
+            signal: controller.signal,
+          }).then((r) => r.json())
         )
       );
 
-      // Flatten, deduplicate by job_id, normalise
-      const seen = new Set();
+      if (controller.signal.aborted) return; // a newer search superseded this one
+
+      // Flatten, deduplicate by job_id AND by title+company (aggregators
+      // often list the same role twice via different publishers), normalise
+      const seenId = new Set();
+      const seenTitleCompany = new Set();
       const allJobs = [];
       results.forEach((r) => {
         if (r.status === "fulfilled" && Array.isArray(r.value?.data)) {
-          r.value.data.forEach((item, i) => {
-            if (!seen.has(item.job_id)) {
-              seen.add(item.job_id);
-              allJobs.push(normaliseJob(item, allJobs.length));
-            }
+          r.value.data.forEach((item) => {
+            const dupeKey = `${(item.job_title || "").toLowerCase()}|${(item.employer_name || "").toLowerCase()}`;
+            if (seenId.has(item.job_id) || seenTitleCompany.has(dupeKey)) return;
+            seenId.add(item.job_id);
+            seenTitleCompany.add(dupeKey);
+            allJobs.push(normaliseJob(item, allJobs.length));
           });
         }
       });
@@ -726,14 +799,19 @@ function JobsStep({ profile, onApply }) {
 
       // Sort by match score descending
       allJobs.sort((a, b) => b.match - a.match);
+      cache.current.set(loc, allJobs);
       setJobs(allJobs);
       showToast(`Found ${allJobs.length} real job listings!`, "success");
     } catch (err) {
+      if (err.name === "AbortError") return; // superseded, not a real failure
       showToast(`Job search error: ${err.message?.slice(0, 80)}`, "error");
       console.error("generateJobs error:", err);
       setJobs(sampleJobs(profile));
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+        setSearching(false);
+      }
     }
   };
 
@@ -766,6 +844,9 @@ function JobsStep({ profile, onApply }) {
 
   const getBoardColor = (id) => JOB_BOARDS.find((b) => b.id === id)?.color || "#888";
   const getBoardName = (id) => JOB_BOARDS.find((b) => b.id === id)?.name || id;
+  // Prefer the job's real publisher name (e.g. "ZipRecruiter") over the
+  // generic "Company Site" bucket used only for grouping/filtering.
+  const getBoardDisplay = (job) => job.boardLabel || getBoardName(job.board);
 
   const markApplied = (jobId, method) => {
     const job = jobs.find((j) => j.id === jobId);
@@ -778,8 +859,8 @@ function JobsStep({ profile, onApply }) {
     return (
       <div className="text-center py-24">
         <div className="text-5xl mb-4 animate-spin">🔍</div>
-        <div className="text-white/60 font-mono text-sm">Scanning top job boards…</div>
-        <div className="text-white/30 text-xs mt-2 animate-pulse">LinkedIn · Indeed · Glassdoor · RemoteOK</div>
+        <div className="text-ink/60 font-mono text-sm">Scanning top job boards…</div>
+        <div className="text-ink/30 text-xs mt-2 animate-pulse">LinkedIn · Indeed · Glassdoor · RemoteOK</div>
       </div>
     );
   }
@@ -792,34 +873,36 @@ function JobsStep({ profile, onApply }) {
     <div className="max-w-4xl mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-white" style={{ fontFamily: "'Playfair Display', serif" }}>
+          <h2 className="text-2xl font-bold text-ink flex items-center gap-2" style={{ fontFamily: "'Playfair Display', serif" }}>
             {filtered.length} Job Matches
+            {searching && <span className="text-xs font-sans font-normal text-indigo-400 animate-pulse">🔄 Updating…</span>}
           </h2>
-          <p className="text-white/40 text-sm">Based on your profile · Sorted by match score</p>
+          <p className="text-ink/40 text-sm">Based on your profile · Sorted by match score</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Location picker */}
           <select
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-sm focus:outline-none focus:border-cyan-400/40"
+            className="px-4 py-2 rounded-xl bg-ink/5 border border-ink/10 text-ink/70 text-sm focus:outline-none focus:border-indigo-400/40"
           >
             {LOCATIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
 
           {/* Re-search with new location */}
           <button
-            onClick={() => { setJobs([]); setLoading(true); done.current = false; generateJobs(); }}
-            className="px-4 py-2 rounded-xl bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 text-sm font-medium hover:bg-cyan-400/20 transition-all"
+            onClick={() => { setSearching(true); generateJobs(location); }}
+            disabled={searching}
+            className="px-4 py-2 rounded-xl bg-indigo-400/10 border border-indigo-400/20 text-indigo-400 text-sm font-medium hover:bg-indigo-400/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            🔍 Search
+            {searching ? "🔄 Searching…" : "🔍 Search"}
           </button>
 
           {/* Remote toggle — shown for all professions */}
           <button
             onClick={() => setRemoteOnly((v) => !v)}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-              remoteOnly ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-white/5 border-white/10 text-white/50 hover:border-white/25"
+              remoteOnly ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-ink/5 border-ink/10 text-ink/50 hover:border-ink/25"
             }`}
           >
             💻 Remote Only
@@ -829,7 +912,7 @@ function JobsStep({ profile, onApply }) {
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-sm focus:outline-none focus:border-cyan-400/40"
+            className="px-4 py-2 rounded-xl bg-ink/5 border border-ink/10 text-ink/70 text-sm focus:outline-none focus:border-indigo-400/40"
           >
             <option value="all">All Boards</option>
             {boards.map((b) => <option key={b} value={b}>{getBoardName(b)}</option>)}
@@ -837,14 +920,14 @@ function JobsStep({ profile, onApply }) {
         </div>
       </div>
 
-      <div className="grid gap-4">
+      <div className={`grid gap-4 transition-opacity duration-300 ${searching ? "opacity-40 pointer-events-none" : "opacity-100"}`}>
         {filtered.map((job) => (
           <div
             key={job.id}
             className={`rounded-2xl border transition-all duration-200 cursor-pointer group ${
-              applied[job.id] ? "opacity-60 border-white/5" : "border-white/8 hover:border-cyan-400/20 hover:bg-white/3"
+              applied[job.id] ? "opacity-60 border-ink/5" : "border-ink/8 hover:border-indigo-400/20 hover:bg-ink/3"
             }`}
-            style={{ background: "rgba(22,27,39,0.8)", padding: "1.25rem 1.5rem" }}
+            style={{ background: "var(--bg-card)", padding: "1.25rem 1.5rem" }}
             onClick={() => setSelected(job)}
           >
             <div className="flex flex-wrap gap-4 items-start">
@@ -856,27 +939,27 @@ function JobsStep({ profile, onApply }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-start gap-2 mb-1">
-                  <span className="text-white font-semibold group-hover:text-cyan-300 transition-colors">{job.title}</span>
+                  <span className="text-ink font-semibold group-hover:text-indigo-300 transition-colors">{job.title}</span>
                   {job.urgent && <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs">🔥 Urgent</span>}
                   {applied[job.id] && <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs">✓ Applied</span>}
                 </div>
-                <div className="text-white/50 text-sm mb-2">{job.company} · {job.location} · {job.type}</div>
+                <div className="text-ink/50 text-sm mb-2">{job.company} · {job.location} · {job.type}</div>
                 <div className="flex flex-wrap gap-2">
                   {job.remote && <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs">🌍 Remote</span>}
-                  {(job.tags || []).map((t) => <span key={t} className="px-2 py-0.5 rounded-full bg-white/5 text-white/40 text-xs">{t}</span>)}
-                  <span className="px-2 py-0.5 rounded-full bg-white/5 text-white/40 text-xs">{getBoardName(job.board)}</span>
+                  {(job.tags || []).map((t) => <span key={t} className="px-2 py-0.5 rounded-full bg-ink/5 text-ink/40 text-xs">{t}</span>)}
+                  <span className="px-2 py-0.5 rounded-full bg-ink/5 text-ink/40 text-xs">{getBoardDisplay(job)}</span>
                 </div>
               </div>
               <div className="text-right flex-shrink-0">
                 <div
                   className="text-lg font-bold font-mono"
-                  style={{ color: job.match >= 90 ? "#00D9FF" : job.match >= 75 ? "#A78BFA" : "#F59E0B" }}
+                  style={{ color: job.match >= 90 ? "var(--match-hi)" : job.match >= 75 ? "var(--match-mid)" : "#F59E0B" }}
                 >
                   {job.match}%
                 </div>
-                <div className="text-white/30 text-xs">match</div>
-                <div className="text-white/50 text-xs mt-1">{job.salary}</div>
-                <div className="text-white/25 text-xs">{job.postedDays}d ago</div>
+                <div className="text-ink/30 text-xs">match</div>
+                <div className="text-ink/50 text-xs mt-1">{job.salary}</div>
+                <div className="text-ink/25 text-xs">{job.postedDays}d ago</div>
               </div>
             </div>
           </div>
@@ -884,7 +967,7 @@ function JobsStep({ profile, onApply }) {
       </div>
 
       {filtered.length === 0 && (
-        <div className="text-center py-16 text-white/30">
+        <div className="text-center py-16 text-ink/30">
           <div className="text-4xl mb-3">🔍</div>
           No jobs match your current filters
         </div>
@@ -902,7 +985,8 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
   // Three-stage apply flow: idle → reviewing → done
   const [applyStage, setApplyStage] = useState("idle");
 
-  const board = JOB_BOARDS.find((b) => b.id === job.board) || JOB_BOARDS[0];
+  const board = JOB_BOARDS.find((b) => b.id === job.board) || JOB_BOARDS.find((b) => b.id === "other");
+  const boardName = job.boardLabel || board.name;
   const searchQuery = encodeURIComponent(`${job.title} ${job.company}`);
   const applyUrl = job.applyUrl || `${board.url}${searchQuery}`;
 
@@ -963,7 +1047,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           toName:  profile.name,
           jobTitle: job.title,
           company:  job.company,
-          board:    board.name,
+          board:    boardName,
           date:     new Date().toLocaleDateString(),
           message:  `You used JobAI's one-click assist to apply for ${job.title} at ${job.company}. Your cover letter was copied to your clipboard and the job page was opened for you to paste and submit.`,
         });
@@ -991,25 +1075,25 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           toName:  profile.name,
           jobTitle: job.title,
           company:  job.company,
-          board:    board.name,
+          board:    boardName,
           date:     new Date().toLocaleDateString(),
-          message:  `You opened the application for ${job.title} at ${job.company} on ${board.name}.`,
+          message:  `You opened the application for ${job.title} at ${job.company} on ${boardName}.`,
         });
       } catch {}
     }
-    showToast(`Opened ${board.name} — good luck!`, "info");
+    showToast(`Opened ${boardName} — good luck!`, "info");
   };
 
   return (
     <div className="max-w-3xl mx-auto">
-      <button onClick={onBack} className="flex items-center gap-2 text-white/40 hover:text-white/80 text-sm mb-6 transition-colors">
+      <button onClick={onBack} className="flex items-center gap-2 text-ink/40 hover:text-ink/80 text-sm mb-6 transition-colors">
         ← Back to jobs
       </button>
 
       {/* Job Header */}
       <div
         className="rounded-2xl p-6 mb-6"
-        style={{ background: "linear-gradient(135deg, rgba(0,217,255,0.06), rgba(124,58,237,0.06))", border: "1px solid rgba(0,217,255,0.12)" }}
+        style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.06), rgba(124,58,237,0.06))", border: "1px solid rgba(99,102,241,0.12)" }}
       >
         <div className="flex flex-wrap gap-4 items-start mb-4">
           <div
@@ -1019,21 +1103,21 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
             {job.company?.substring(0, 2).toUpperCase()}
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold text-white mb-0.5" style={{ fontFamily: "'Playfair Display', serif" }}>{job.title}</h2>
-            <div className="text-cyan-400/80 text-sm">{job.company} · {job.location}</div>
+            <h2 className="text-xl font-bold text-ink mb-0.5" style={{ fontFamily: "'Playfair Display', serif" }}>{job.title}</h2>
+            <div className="text-indigo-400/80 text-sm">{job.company} · {job.location}</div>
             <div className="flex flex-wrap gap-2 mt-2">
               {job.remote && <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs">🌍 Remote</span>}
-              <span className="px-2 py-0.5 rounded-full bg-white/8 text-white/60 text-xs">{job.type}</span>
-              <span className="px-2 py-0.5 rounded-full bg-white/8 text-white/60 text-xs">{board.name}</span>
+              <span className="px-2 py-0.5 rounded-full bg-ink/8 text-ink/60 text-xs">{job.type}</span>
+              <span className="px-2 py-0.5 rounded-full bg-ink/8 text-ink/60 text-xs">{boardName}</span>
               {job.urgent && <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs">🔥 Urgent</span>}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-bold font-mono" style={{ color: job.match >= 90 ? "#00D9FF" : job.match >= 75 ? "#A78BFA" : "#F59E0B" }}>
+            <div className="text-2xl font-bold font-mono" style={{ color: job.match >= 90 ? "var(--match-hi)" : job.match >= 75 ? "var(--match-mid)" : "#F59E0B" }}>
               {job.match}%
             </div>
-            <div className="text-white/30 text-xs">match score</div>
-            <div className="text-white/60 text-sm font-mono mt-1">{job.salary}</div>
+            <div className="text-ink/30 text-xs">match score</div>
+            <div className="text-ink/60 text-sm font-mono mt-1">{job.salary}</div>
           </div>
         </div>
 
@@ -1062,7 +1146,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
               </button>
               <button
                 onClick={manualApply}
-                className="px-5 py-2.5 rounded-xl bg-white/8 border border-white/12 text-white/70 text-sm font-medium hover:bg-white/12 transition-all"
+                className="px-5 py-2.5 rounded-xl bg-ink/8 border border-ink/12 text-ink/70 text-sm font-medium hover:bg-ink/12 transition-all"
               >
                 ↗ Open Job Page Only
               </button>
@@ -1070,12 +1154,12 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                 onClick={oneClickApply}
                 disabled={sendingEmail}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-black text-sm font-bold transition-all"
-                style={{ background: "linear-gradient(135deg, #00D9FF, #0EA5E9)", boxShadow: "0 0 20px rgba(0,217,255,0.3)" }}
+                style={{ background: "linear-gradient(135deg, #6366F1, #4F46E5)", boxShadow: "0 0 20px rgba(99,102,241,0.3)" }}
               >
                 {sendingEmail ? "Sending email…" : "⚡ One-Click Assist"}
               </button>
             </div>
-            <p className="text-white/25 text-xs mt-3">
+            <p className="text-ink/25 text-xs mt-3">
               ⚡ One-Click Assist opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
             </p>
           </div>
@@ -1091,40 +1175,40 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
             </button>
             <button
               onClick={manualApply}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/8 border border-white/12 text-white/70 text-sm font-medium hover:bg-white/12 transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-ink/8 border border-ink/12 text-ink/70 text-sm font-medium hover:bg-ink/12 transition-all"
             >
-              ↗ Apply on {board.name}
+              ↗ Apply on {boardName}
             </button>
           </div>
         )}
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-4 bg-white/3 rounded-xl p-1">
+      <div className="flex gap-1 mb-4 bg-ink/3 rounded-xl p-1">
         {["details", "requirements", "coverletter"].map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all capitalize ${
-              tab === t ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"
+              tab === t ? "bg-ink/10 text-ink" : "text-ink/40 hover:text-ink/70"
             }`}
           >
             {t === "coverletter" ? "Cover Letter" : t}
-            {t === "coverletter" && coverLetter && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block" />}
+            {t === "coverletter" && coverLetter && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block" />}
           </button>
         ))}
       </div>
 
-      <div className="rounded-2xl bg-white/3 border border-white/8 p-6">
+      <div className="rounded-2xl bg-ink/3 border border-ink/8 p-6">
         {tab === "details" && (
           <div>
-            <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">About the Role</h3>
-            <p className="text-white/70 text-sm leading-relaxed mb-6">{job.description}</p>
+            <h3 className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">About the Role</h3>
+            <p className="text-ink/70 text-sm leading-relaxed mb-6">{job.description}</p>
             <div className="grid grid-cols-2 gap-4 text-sm">
               {[["Industry", job.industry], ["Posted", `${job.postedDays} days ago`], ["Location", job.location], ["Type", job.type]].map(([k, v]) => (
-                <div key={k} className="bg-white/3 rounded-xl p-3">
-                  <div className="text-white/30 text-xs mb-1">{k}</div>
-                  <div className="text-white/80">{v}</div>
+                <div key={k} className="bg-ink/3 rounded-xl p-3">
+                  <div className="text-ink/30 text-xs mb-1">{k}</div>
+                  <div className="text-ink/80">{v}</div>
                 </div>
               ))}
             </div>
@@ -1132,26 +1216,26 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         )}
         {tab === "requirements" && (
           <div>
-            <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">Requirements</h3>
+            <h3 className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">Requirements</h3>
             <div className="space-y-2">
               {(job.requirements || []).map((r, i) => {
                 const matches = profile.skills?.some((s) => s.toLowerCase().includes(r.toLowerCase()) || r.toLowerCase().includes(s.toLowerCase()));
                 return (
-                  <div key={i} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm ${matches ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-300" : "bg-white/3 border border-white/8 text-white/60"}`}>
+                  <div key={i} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm ${matches ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-300" : "bg-ink/3 border border-ink/8 text-ink/60"}`}>
                     <span>{matches ? "✓" : "○"}</span>
                     {r}
                     {matches && <span className="text-emerald-400/60 text-xs ml-auto">You have this</span>}
                   </div>
                 );
               })}
-              {(job.requirements || []).length === 0 && <p className="text-white/30 text-sm">No requirements listed — check the full posting.</p>}
+              {(job.requirements || []).length === 0 && <p className="text-ink/30 text-sm">No requirements listed — check the full posting.</p>}
             </div>
           </div>
         )}
         {tab === "coverletter" && (
           <div>
-            <h3 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">
-              AI Cover Letter {coverLetter && <span className="text-cyan-400 ml-1">— editable</span>}
+            <h3 className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">
+              AI Cover Letter {coverLetter && <span className="text-indigo-400 ml-1">— editable</span>}
             </h3>
             {coverLetter ? (
               <>
@@ -1159,13 +1243,13 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                   value={coverLetter}
                   onChange={(e) => setCoverLetter(e.target.value)}
                   rows={14}
-                  className="w-full bg-white/3 border border-white/8 rounded-xl text-white/80 text-sm leading-relaxed p-4 resize-none focus:outline-none focus:border-cyan-400/30"
+                  className="w-full bg-ink/3 border border-ink/8 rounded-xl text-ink/80 text-sm leading-relaxed p-4 resize-none focus:outline-none focus:border-indigo-400/30"
                   style={{ fontFamily: "'Outfit', sans-serif" }}
                 />
                 <div className="flex gap-3 mt-3">
                   <button
                     onClick={() => { navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success"); }}
-                    className="px-4 py-2 rounded-xl bg-white/8 text-white/60 text-sm hover:bg-white/12 transition-all"
+                    className="px-4 py-2 rounded-xl bg-ink/8 text-ink/60 text-sm hover:bg-ink/12 transition-all"
                   >
                     📋 Copy
                   </button>
@@ -1181,7 +1265,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                       onClick={oneClickApply}
                       disabled={sendingEmail}
                       className="ml-auto px-4 py-2 rounded-xl text-black text-sm font-bold"
-                      style={{ background: "linear-gradient(135deg, #00D9FF, #0EA5E9)" }}
+                      style={{ background: "linear-gradient(135deg, #6366F1, #4F46E5)" }}
                     >
                       {sendingEmail ? "Sending…" : "⚡ Apply Now"}
                     </button>
@@ -1189,7 +1273,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                 </div>
               </>
             ) : (
-              <div className="text-center py-8 text-white/30">
+              <div className="text-center py-8 text-ink/30">
                 <div className="text-3xl mb-3">✦</div>
                 <p className="text-sm mb-4">Generate a cover letter to see it here — you can edit it before applying</p>
                 <button
@@ -1219,27 +1303,27 @@ function TrackerPanel({ applications, onClose }) {
     >
       <div
         className="w-full max-w-sm h-full overflow-y-auto"
-        style={{ background: "#0D1117", borderLeft: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ background: "var(--bg-panel)", borderLeft: "1px solid var(--border-soft)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-white font-bold text-lg" style={{ fontFamily: "'Playfair Display', serif" }}>Applications</h3>
-            <button onClick={onClose} className="text-white/40 hover:text-white text-xl transition-colors">×</button>
+            <h3 className="text-ink font-bold text-lg" style={{ fontFamily: "'Playfair Display', serif" }}>Applications</h3>
+            <button onClick={onClose} className="text-ink/40 hover:text-ink text-xl transition-colors">×</button>
           </div>
           {applications.length === 0 ? (
-            <div className="text-center py-12 text-white/30 text-sm">No applications yet</div>
+            <div className="text-center py-12 text-ink/30 text-sm">No applications yet</div>
           ) : (
             <div className="space-y-3">
               {applications.map((app, i) => (
-                <div key={i} className="rounded-xl bg-white/3 border border-white/8 p-4">
-                  <div className="text-white font-semibold text-sm">{app.title}</div>
-                  <div className="text-white/50 text-xs">{app.company}</div>
+                <div key={i} className="rounded-xl bg-ink/3 border border-ink/8 p-4">
+                  <div className="text-ink font-semibold text-sm">{app.title}</div>
+                  <div className="text-ink/50 text-xs">{app.company}</div>
                   <div className="flex items-center justify-between mt-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${app.method === "auto" ? "bg-cyan-500/20 text-cyan-300" : "bg-violet-500/20 text-violet-300"}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${app.method === "auto" ? "bg-indigo-500/20 text-indigo-300" : "bg-violet-500/20 text-violet-300"}`}>
                       {statuses[app.method]}
                     </span>
-                    <span className="text-white/25 text-xs">{app.date}</span>
+                    <span className="text-ink/25 text-xs">{app.date}</span>
                   </div>
                 </div>
               ))}
@@ -1256,7 +1340,34 @@ function TrackerPanel({ applications, onClose }) {
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
 const load = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 
+// Theme: "light" | "dark" | "system". Persists to localStorage and, in
+// "system" mode, stays in sync with the OS/browser preference live —
+// no reload needed if the person flips their system theme mid-session.
+function useTheme() {
+  const [theme, setTheme] = useState(() => load("jobai_theme", "system"));
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const isDark = theme === "system" ? media.matches : theme === "dark";
+      root.classList.toggle("dark", isDark);
+    };
+
+    apply();
+    save("jobai_theme", theme);
+
+    if (theme === "system") {
+      media.addEventListener("change", apply);
+      return () => media.removeEventListener("change", apply);
+    }
+  }, [theme]);
+
+  return [theme, setTheme];
+}
+
 export default function App() {
+  const [theme, setTheme] = useTheme();
   const [step, setStep] = useState(() => load("jobai_step", 0));
   const [uploadData, setUploadData] = useState(null);
   const [profile, setProfile] = useState(() => load("jobai_profile", null));
@@ -1318,62 +1429,70 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #080A0F; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
         @keyframes slideInToast { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
         @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .fade-in { animation: fadeIn 0.4s ease forwards; }
-        select option { background: #161B27; color: white; }
+        select option { background: var(--select-bg); color: var(--select-fg); }
       `}</style>
 
       <div
         style={{
           minHeight: "100vh",
-          background: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0,217,255,0.06) 0%, transparent 60%), #080A0F",
+          background: "radial-gradient(ellipse 80% 50% at 50% -20%, var(--bg-glow) 0%, transparent 60%), var(--bg-app)",
           fontFamily: "'Outfit', sans-serif",
-          color: "white",
+          color: "rgb(var(--ink))",
+          transition: "background-color 0.25s ease, color 0.25s ease",
         }}
       >
         {/* Navbar */}
         <nav
           className="flex items-center justify-between px-6 py-4 sticky top-0 z-30"
-          style={{ background: "rgba(8,10,15,0.85)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+          style={{ background: "var(--bg-nav)", backdropFilter: "blur(16px)", borderBottom: "1px solid var(--border-faint)" }}
         >
           <div className="flex items-center gap-3">
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-black"
-              style={{ background: "linear-gradient(135deg, #00D9FF, #7C3AED)" }}
+              style={{ background: "linear-gradient(135deg, #6366F1, #7C3AED)" }}
             >
               J
             </div>
-            <span className="font-bold text-white text-lg" style={{ fontFamily: "'Playfair Display', serif" }}>JobAI</span>
-            <span className="text-white/20 text-xs hidden sm:block">by AI</span>
+            <span className="font-bold text-ink text-lg" style={{ fontFamily: "'Playfair Display', serif" }}>JobAI</span>
+            <span className="text-ink/30 text-xs hidden sm:block">by Philos Digital Labs</span>
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex gap-2 text-xs text-white/30 items-center">
+            <div className="hidden sm:flex gap-2 text-xs text-ink/30 items-center">
               {JOB_BOARDS.slice(0, 4).map((b) => (
-                <span key={b.id} className="px-2 py-1 rounded-md bg-white/4 border border-white/6" style={{ color: b.color + "99" }}>
+                <span key={b.id} className="px-2 py-1 rounded-md bg-ink/4 border border-ink/6" style={{ color: b.color + "99" }}>
                   {b.name}
                 </span>
               ))}
             </div>
+            <button
+              onClick={() => setTheme((t) => (t === "system" ? "light" : t === "light" ? "dark" : "system"))}
+              title={`Theme: ${{ system: "Auto (matches your device)", light: "Light", dark: "Dark" }[theme]} — click to change`}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all bg-ink/6 border border-ink/10 hover:border-ink/25 text-ink/60 hover:text-ink"
+            >
+              {{ system: "🖥️", light: "☀️", dark: "🌙" }[theme]}
+              <span className="hidden sm:inline">{{ system: "Auto", light: "Light", dark: "Dark" }[theme]}</span>
+            </button>
             {step > 0 && (
               <button
                 onClick={handleReset}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-white/4 border border-white/8 hover:border-red-400/30 text-white/30 hover:text-red-400"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-ink/4 border border-ink/8 hover:border-red-400/30 text-ink/30 hover:text-red-400"
               >
                 ↺ Fresh Start
               </button>
             )}
             <button
               onClick={() => setShowTracker(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-white/6 border border-white/10 hover:border-white/25 text-white/60 hover:text-white"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-ink/6 border border-ink/10 hover:border-ink/25 text-ink/60 hover:text-ink"
             >
-              📋 {applications.length > 0 && <span className="text-cyan-400 font-bold">{applications.length}</span>} Applications
+              📋 {applications.length > 0 && <span className="text-indigo-400 font-bold">{applications.length}</span>} Applications
             </button>
           </div>
         </nav>
@@ -1400,8 +1519,8 @@ export default function App() {
         </main>
 
         {/* Footer */}
-        <footer className="text-center py-8 text-white/15 text-xs border-t border-white/5 mt-8">
-          JobAI · Powered by Groq AI (Free) · Searches LinkedIn, Indeed, Glassdoor, RemoteOK, Wellfound & more
+        <footer className="text-center py-8 text-ink/15 text-xs border-t border-ink/5 mt-8">
+          JobAI by Philos Digital Labs · Powered by Groq AI (Free) · Searches LinkedIn, Indeed, Glassdoor, RemoteOK, Wellfound & more
         </footer>
 
         {showTracker && <TrackerPanel applications={applications} onClose={() => setShowTracker(false)} />}

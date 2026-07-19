@@ -2,10 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F7F7FB" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#080A0F" media="(prefers-color-scheme: dark)" />
     <title>JobAI – AI-Powered Job Applications</title>
     <meta name="description" content="Upload your CV, get AI-matched jobs, and apply across LinkedIn, Indeed, Glassdoor and more." />
+    <meta name="author" content="Philos Digital Labs" />
+    <script>
+      // Set the theme class before React mounts so there's no flash of the
+      // wrong theme on load. Mirrors the logic in useTheme() in src/index.jsx.
+      (function () {
+        try {
+          var saved = JSON.parse(localStorage.getItem("jobai_theme") || '"system"');
+          var isDark = saved === "dark" || (saved === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", isDark);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -2,16 +2,19 @@
 
 > Upload your CV → AI parses it → Get matched jobs → Apply in one click.
 
+Built by **Philos Digital Labs**.
+
 Live demo: **[jobai-orpin.vercel.app](https://jobai-orpin.vercel.app)**
 
 ---
 
 ## Features
 
-- **CV Parsing** — Upload a PDF or image; AI extracts your skills, experience, and role
+- **CV Parsing** — Upload a PDF, Word (.docx), or image; AI extracts your skills, experience, and role
 - **Job Matching** — 12+ real, ranked job listings pulled from JSearch (RapidAPI)
 - **AI Cover Letters** — One-click generation tailored to each job posting
 - **Apply Flow** — Opens the job page and copies your cover letter to clipboard
+- **Light / Dark Mode** — Follows your OS/browser preference, or set manually
 - **Remote / Freelance Mode** — Toggle for eligible professions
 - **Application Tracker** — Track applied jobs with live toast notifications
 - **Email Notifications** — Get a copy of your cover letter via EmailJS
