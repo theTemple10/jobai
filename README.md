@@ -115,7 +115,7 @@ Click **Deploy**. Live in ~30 seconds. Every future `git push` auto-redeploys.
 ### Groq (AI — Free, No Card Required)
 1. Visit [console.groq.com](https://console.groq.com)
 2. Sign up → API Keys → Create Key
-3. Works globally, including Nigeria ✓
+3. Works globally ✓
 
 ### JSearch (Job Listings)
 1. Visit [rapidapi.com/letscrape-6bfat3ri3r](https://rapidapi.com/letscrape-6bfat3ri3r/api/jsearch)
@@ -133,7 +133,7 @@ Click **Deploy**. Live in ~30 seconds. Every future `git push` auto-redeploys.
 
 | Service | Cost |
 |---|---|
-| Groq API | **Free** (generous rate limits, no card) |
+| Groq API | **Free** (generous rate limits, no card details needed) |
 | JSearch | **Free** tier available (10 req/month on basic) |
 | EmailJS | **Free** tier (200 emails/month) |
 | Vercel | **Free** (Hobby plan) |
