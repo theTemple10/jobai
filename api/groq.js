@@ -8,7 +8,9 @@ const SYSTEMS = {
 
 export function buildRequest(body) {
   if (!body || !Object.hasOwn(SYSTEMS, body.operation)) throw new HttpError(400, 'Choose a supported writing operation.');
-  const content = body.operation === 'rewrite' ? body.text : body.messages?.findLast(message => message.role === 'user')?.content;
+  if (body.useVision && body.operation !== 'parse') throw new HttpError(400, 'Vision is supported only for CV analysis.');
+  if (body.operation !== 'rewrite' && (!Array.isArray(body.messages) || body.messages.length > 3)) throw new HttpError(400, 'Please provide valid document messages.');
+  const content = body.operation === 'rewrite' ? body.text : body.messages.findLast(message => message && message.role === 'user')?.content;
   if (typeof content === 'string') {
     if (!content.trim() || content.length > 80000 || (body.operation === 'rewrite' && content.length > 12000)) throw new HttpError(400, 'Please provide a shorter, non-empty text.');
   } else if (Array.isArray(content) && body.operation === 'parse' && body.useVision) {
@@ -31,7 +33,7 @@ export default async function handler(req, res) {
   try {
     const request = buildRequest(req.body);
     const identity = await authorize(req);
-    await rateLimit(identity, 'ai', 30);
+    await rateLimit(identity, 'ai', 30, req.headers.authorization);
     if (!process.env.GROQ_API_KEY) throw new HttpError(503, 'AI assistance is not connected yet. You can still build your CV manually.');
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST', headers: {'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GROQ_API_KEY}`},

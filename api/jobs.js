@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   try {
     const params = buildSearch(req.query || {});
     const identity = await authorize(req);
-    await rateLimit(identity, 'jobs', 40);
+    await rateLimit(identity, 'jobs', 40, req.headers.authorization);
     if (!process.env.JSEARCH_KEY) throw new HttpError(503, 'Live job search is not connected yet. You can still build and download a CV.');
     const response = await fetch(`https://jsearch.p.rapidapi.com/search?${params}`, {
       headers: {'X-RapidAPI-Key': process.env.JSEARCH_KEY, 'X-RapidAPI-Host': 'jsearch.p.rapidapi.com'}, signal: AbortSignal.timeout(20000),
