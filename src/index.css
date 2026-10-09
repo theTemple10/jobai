@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 /*
   Theme tokens — light is the default (:root), dark is opt-in via the
@@ -11,17 +10,17 @@
   original `text-white/50` etc. used to work.
 */
 :root {
-  --ink: 15 23 42;                       /* slate-900 -- primary text/border/overlay base */
-  --bg-app: #F7F7FB;                     /* page background */
+  --ink: 11 30 61;                       /* slate-900 -- primary text/border/overlay base */
+  --bg-app: #F7F5F0;                     /* page background */
   --bg-glow: rgba(99, 102, 241, 0.05);   /* subtle hero glow tint */
-  --bg-nav: rgba(247, 247, 251, 0.85);   /* navbar / footer backdrop */
-  --bg-panel: #FFFFFF;                   /* drawers / solid panels */
+  --bg-nav: rgba(247, 245, 240, 0.95);   /* navbar / footer backdrop */
+  --bg-panel: #FFFDF8;                   /* drawers / solid panels */
   --bg-card: rgba(255, 255, 255, 0.9);   /* job cards */
   --bg-disabled: #CBD5E1;                /* disabled button fill */
   --border-soft: rgba(15, 23, 42, 0.10);
   --border-faint: rgba(15, 23, 42, 0.06);
   --scrollbar-thumb: rgba(15, 23, 42, 0.16);
-  --select-bg: #FFFFFF;
+  --select-bg: #FFFDF8;
   --select-fg: #0F172A;
   --match-hi: #4F46E5;    /* indigo-600 — darker for AA contrast on white */
   --match-mid: #7C3AED;   /* violet-600 — darker for AA contrast on white */
@@ -29,17 +28,17 @@
 
 .dark {
   --ink: 255 255 255;                    /* white -- primary text/border/overlay base */
-  --bg-app: #080A0F;
+  --bg-app: #0B0F19;
   --bg-glow: rgba(99, 102, 241, 0.06);
   --bg-nav: rgba(8, 10, 15, 0.85);
-  --bg-panel: #0D1117;
+  --bg-panel: #151C2C;
   --bg-card: rgba(22, 27, 39, 0.8);
   --bg-disabled: #4B5563;
   --border-soft: rgba(255, 255, 255, 0.08);
   --border-faint: rgba(255, 255, 255, 0.05);
   --scrollbar-thumb: rgba(255, 255, 255, 0.1);
   --select-bg: #161B27;
-  --select-fg: #FFFFFF;
+  --select-fg: #FFFDF8;
   --match-hi: #6366F1;    /* indigo-500 — pops on near-black */
   --match-mid: #A78BFA;   /* violet-400 — pops on near-black */
 }
@@ -47,6 +46,8 @@
 body {
   background: var(--bg-app);
   color: rgb(var(--ink));
-  color-scheme: light dark;
+  color-scheme: light;
   transition: background-color 0.25s ease, color 0.25s ease;
 }
+
+.dark body { color-scheme: dark; }

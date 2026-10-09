@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { normalizeJob, normalizeProfile } from "./lib/jobs.js";
+import { requestAI, authHeaders } from "./lib/ai.js";
+import { extractPdfText, extractDocxText } from "./lib/parseDocument.js";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 // All sensitive keys (Groq, JSearch) live server-side in /api/*.js
@@ -8,7 +11,6 @@ const EJS_TEMPLATE = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "";
 const EJS_KEY      = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  || "";
 
 // Proxy endpoints (Vercel serverless functions in /api/)
-const PROXY_GROQ = "/api/groq";
 const PROXY_JOBS = "/api/jobs";
 
 const JOB_BOARDS = [
@@ -33,52 +35,9 @@ const REMOTE_PROFESSIONS = [
   "translator", "editor", "photographer", "video", "copywriter", "support",
 ];
 
-const STEPS = ["Upload CV", "AI Analysis", "Profile", "Job Match", "Apply"];
+const STEPS = ["Upload CV", "Analysis", "Profile", "Explore & prepare"];
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
-
-// Loads PDF.js from CDN and extracts all text from a PDF file
-async function extractPdfText(file) {
-  // Dynamically load PDF.js from CDN — no npm install needed
-  if (!window.pdfjsLib) {
-    await new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-  }
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    fullText += content.items.map((item) => item.str).join(" ") + "\n";
-  }
-  return fullText.trim();
-}
-
-// Loads Mammoth.js from CDN and extracts all text from a .docx file.
-// Legacy .doc (pre-2007 binary format) is intentionally not supported —
-// it isn't reliably parseable client-side.
-async function extractDocxText(file) {
-  if (!window.mammoth) {
-    await new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js";
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-  const arrayBuffer = await file.arrayBuffer();
-  const result = await window.mammoth.extractRawText({ arrayBuffer });
-  return (result.value || "").trim();
-}
 
 // For image CVs: convert to base64 for vision model
 const fileToBase64 = (file) =>
@@ -94,7 +53,6 @@ const isRemoteEligible = (title = "", skills = []) => {
   return REMOTE_PROFESSIONS.some((p) => combined.includes(p));
 };
 
-const slug = (str) => str.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
 // ─── TOAST SYSTEM ────────────────────────────────────────────────────────────
 let toastId = 0;
@@ -126,7 +84,7 @@ function ToastContainer() {
   };
 
   return (
-    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" style={{ maxWidth: 360 }}>
+    <div role="status" aria-live="polite" className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" style={{ maxWidth: 360 }}>
       {toasts.map((t) => (
         <div
           key={t.id}
@@ -142,7 +100,7 @@ function ToastContainer() {
 }
 
 // ─── API CALL (via secure server proxy — keys never in browser) ──────────────
-async function callClaude({ system, userContent, maxTokens = 1000, useVision = false }) {
+async function callClaude({ userContent, useVision = false, operation = "parse", signal }) {
   // Build message content for Groq (OpenAI-compatible format)
   let messageContent;
   if (typeof userContent === "string") {
@@ -164,32 +122,14 @@ async function callClaude({ system, userContent, maxTokens = 1000, useVision = f
     }
   }
 
-  const model = useVision ? "meta-llama/llama-4-scout-17b-16e-instruct" : "llama-3.3-70b-versatile";
-  const messages = [];
-  if (system) messages.push({ role: "system", content: system });
-  messages.push({ role: "user", content: messageContent });
-
-  // Call our own proxy — key stays on the server
-  const res = await fetch("/api/groq", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || err?.error || `API error ${res.status}`);
-  }
-
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || "";
+  return requestAI({operation, useVision, messages: [{role: "user", content: messageContent}]}, signal);
 }
 
 // ─── EMAIL (EmailJS — real delivery, free) ───────────────────────────────────
 async function sendEmail({ toEmail, toName, jobTitle, company, board, date, message }) {
   if (!EJS_SERVICE || !EJS_TEMPLATE || !EJS_KEY) {
     console.warn("EmailJS not configured — skipping email.");
-    return;
+    return false;
   }
   // Load EmailJS SDK from CDN on first use
   if (!window.emailjs) {
@@ -210,17 +150,18 @@ async function sendEmail({ toEmail, toName, jobTitle, company, board, date, mess
     date,
     message,
   });
+  return true;
 }
 function StepIndicator({ current }) {
   return (
-    <div className="flex items-center justify-center gap-0 mb-10">
+    <div className="flex items-center justify-center gap-0 mb-10 overflow-x-auto">
       {STEPS.map((s, i) => (
         <div key={s} className="flex items-center">
           <div className="flex flex-col items-center gap-1">
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500 ${
                 i < current
-                  ? "bg-indigo-500 text-black"
+                  ? "bg-indigo-500 text-white"
                   : i === current
                   ? "bg-indigo-400/20 border-2 border-indigo-400 text-indigo-400"
                   : "bg-ink/5 border border-ink/10 text-ink/30"
@@ -238,7 +179,7 @@ function StepIndicator({ current }) {
           </div>
           {i < STEPS.length - 1 && (
             <div
-              className="h-px w-10 mx-1 mt-[-10px] transition-colors duration-500"
+              className="h-px w-4 sm:w-10 mx-1 mt-[-10px] transition-colors duration-500"
               style={{ background: i < current ? "#818CF8" : "var(--border-soft)" }}
             />
           )}
@@ -253,6 +194,7 @@ function UploadStep({ onNext }) {
   const [file, setFile] = useState(null);
   const [prompt, setPrompt] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [consent, setConsent] = useState(false);
   const fileRef = useRef();
 
   const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -268,6 +210,8 @@ function UploadStep({ onNext }) {
       return;
     }
     if (!validType && !validExt) { showToast("Please upload a PDF, Word (.docx), or image file", "error"); return; }
+    if (f.size > 10 * 1024 * 1024) {showToast("Please use a file smaller than 10MB", "error"); return;}
+    if ((f.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(f.name)) && f.size > 3 * 1024 * 1024) {showToast("Please use an image smaller than 3MB", "error"); return;}
     setFile(f);
     showToast(`${f.name} ready for analysis`, "success");
   };
@@ -301,6 +245,8 @@ function UploadStep({ onNext }) {
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
+        role="button" tabIndex={0} aria-label="Choose a CV file"
+        onKeyDown={(e) => {if (["Enter", " "].includes(e.key)) {e.preventDefault(); fileRef.current?.click();}}}
         onClick={() => fileRef.current?.click()}
       >
         <input ref={fileRef} type="file" accept=".pdf,.docx,image/*" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
@@ -315,7 +261,7 @@ function UploadStep({ onNext }) {
             <>
               <div className="text-5xl mb-4 opacity-40">⬆</div>
               <div className="text-ink/70 font-semibold text-lg mb-1">Drop your CV here</div>
-              <div className="text-ink/30 text-sm">PDF, Word (.docx), PNG, JPG supported · Max 10MB</div>
+              <div className="text-ink/30 text-sm">PDF / Word up to 10MB · PNG / JPG / WebP up to 3MB</div>
             </>
           )}
         </div>
@@ -327,7 +273,7 @@ function UploadStep({ onNext }) {
           Additional Context (Optional)
         </label>
         <textarea
-          rows={3}
+          aria-label="Additional context" rows={3}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="e.g. I'm looking for senior roles in fintech, prefer remote, open to relocation to London or Berlin..."
@@ -336,10 +282,11 @@ function UploadStep({ onNext }) {
         />
       </div>
 
+      <label className="consent"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />I agree to send this CV’s text or image to the AI provider for analysis. The extracted profile will be saved on this device.</label>
       <button
-        disabled={!file}
+        disabled={!file || !consent}
         onClick={() => onNext({ file, prompt })}
-        className="w-full py-4 rounded-xl font-bold text-black text-base transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
+        className="w-full py-4 rounded-xl font-bold text-white text-base transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
         style={{
           background: file ? "linear-gradient(135deg, #6366F1, #4F46E5)" : "var(--bg-disabled)",
           boxShadow: file ? "0 0 30px rgba(99,102,241,0.3)" : "none",
@@ -356,32 +303,14 @@ function UploadStep({ onNext }) {
 function ParsingStep({ file, prompt, onDone }) {
   const [status, setStatus] = useState("Reading your CV…");
   const [progress, setProgress] = useState(0);
-  const done = useRef(false);
-
   useEffect(() => {
-    if (done.current) return;
-    done.current = true;
-
-    const stages = [
-      { msg: "Reading your CV…", pct: 15 },
-      { msg: "Extracting experience & skills…", pct: 40 },
-      { msg: "Identifying key competencies…", pct: 65 },
-      { msg: "Matching to job categories…", pct: 85 },
-      { msg: "Finalising profile…", pct: 95 },
-    ];
-
-    let i = 0;
-    const tick = setInterval(() => {
-      if (i < stages.length) {
-        setStatus(stages[i].msg);
-        setProgress(stages[i].pct);
-        i++;
-      }
-    }, 700);
+    let active = true;
+    let resultTimer;
+    const controller = new AbortController();
 
     (async () => {
       try {
-        const isImage = file.type.startsWith("image/");
+        const isImage = file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name);
         const isDocx = file.name.toLowerCase().endsWith(".docx") ||
           file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         let userContent;
@@ -390,7 +319,7 @@ function ParsingStep({ file, prompt, onDone }) {
           // Image CV → use vision model with base64
           const base64 = await fileToBase64(file);
           userContent = [
-            { type: "image", source: { type: "base64", media_type: file.type, data: base64 } },
+            { type: "image", source: { type: "base64", media_type: file.type || (file.name.toLowerCase().endsWith(".png") ? "image/png" : file.name.toLowerCase().endsWith(".webp") ? "image/webp" : "image/jpeg"), data: base64 } },
             { type: "text", text: `Parse this CV/resume image and return ONLY valid JSON (no markdown, no backticks):
 {
   "name": "Full Name",
@@ -409,7 +338,7 @@ function ParsingStep({ file, prompt, onDone }) {
   "isRemoteEligible": true,
   "industries": ["relevant industries"],
   "keyStrengths": ["strength1", "strength2", "strength3"],
-  "salaryExpectation": "estimated range e.g. $40k-$60k"
+  "salaryExpectation": null
 }
 Additional context: ${prompt || "None provided"}` },
           ];
@@ -446,7 +375,7 @@ Additional context: ${prompt || "None provided"}` },
   "isRemoteEligible": true,
   "industries": ["relevant industries"],
   "keyStrengths": ["strength1", "strength2", "strength3"],
-  "salaryExpectation": "estimated range e.g. $40k-$60k"
+  "salaryExpectation": null
 }
 
 CV TEXT:
@@ -457,35 +386,38 @@ Additional context: ${prompt || "None provided"}`,
           ];
         }
 
+        if (!active) return;
+        setStatus("AI is organizing the extracted information…");
         const raw = await callClaude({
           system: "You are an expert CV parser. Return only valid JSON, no markdown fences, no explanation.",
           userContent,
           maxTokens: 1500,
           useVision: isImage,
+          signal: controller.signal,
         });
 
-        clearInterval(tick);
+        if (!active) return;
         setProgress(100);
         setStatus("Complete!");
 
         let parsed;
         try {
           const clean = raw.replace(/```json|```/g, "").trim();
-          parsed = JSON.parse(clean);
+          parsed = normalizeProfile(JSON.parse(clean));
         } catch {
           throw new Error("Could not parse AI response. Please try again.");
         }
 
-        setTimeout(() => onDone(parsed), 600);
+        resultTimer = setTimeout(() => {if (active) onDone(parsed);}, 600);
       } catch (err) {
-        clearInterval(tick);
+        if (!active) return;
         showToast(err.message || "Analysis failed. Please try again.", "error");
-        setTimeout(() => onDone(null), 1000);
+        resultTimer = setTimeout(() => {if (active) onDone(null);}, 1000);
       }
     })();
 
-    return () => clearInterval(tick);
-  }, []);
+    return () => {active = false; controller.abort(); clearTimeout(resultTimer);};
+  }, [file, prompt, onDone]);
 
   return (
     <div className="max-w-lg mx-auto text-center py-16">
@@ -501,7 +433,7 @@ Additional context: ${prompt || "None provided"}`,
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center text-indigo-400 font-bold font-mono text-lg">
-          {progress}%
+          {progress === 100 ? "✓" : "✦"}
         </div>
       </div>
       <div className="text-ink font-semibold text-xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>
@@ -518,16 +450,18 @@ Additional context: ${prompt || "None provided"}`,
 }
 
 // ─── STEP 2: PROFILE ──────────────────────────────────────────────────────────
+const Tag = ({ label, onRemove }) => (
+    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-ink/8 border border-ink/10 text-ink/70 text-xs">
+      {label}
+      {onRemove && <button aria-label={`Remove ${label}`} onClick={onRemove} className="text-ink/30 hover:text-red-400 transition-colors ml-1">×</button>}
+    </span>
+  );
+
+
 function ProfileStep({ profile, onNext }) {
   const [p, setP] = useState(profile);
   const remote = isRemoteEligible(p.title, p.skills);
 
-  const Tag = ({ label, onRemove }) => (
-    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-ink/8 border border-ink/10 text-ink/70 text-xs">
-      {label}
-      {onRemove && <button onClick={onRemove} className="text-ink/30 hover:text-red-400 transition-colors ml-1">×</button>}
-    </span>
-  );
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -548,7 +482,7 @@ function ProfileStep({ profile, onNext }) {
       >
         <div className="flex flex-wrap items-start gap-4">
           <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-black flex-shrink-0"
+            className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white flex-shrink-0"
             style={{ background: "linear-gradient(135deg, #6366F1, #7C3AED)" }}
           >
             {(p.name || "?").charAt(0)}
@@ -558,14 +492,14 @@ function ProfileStep({ profile, onNext }) {
               value={p.name || ""}
               onChange={(e) => setP({ ...p, name: e.target.value })}
               className="text-xl font-bold text-ink bg-transparent border-none outline-none w-full"
-              placeholder="Your Name"
+              aria-label="Your name" placeholder="Your Name"
               style={{ fontFamily: "'Playfair Display', serif" }}
             />
             <input
               value={p.title || ""}
-              onChange={(e) => setP({ ...p, title: e.target.value })}
+              onChange={(e) => setP({ ...p, title: e.target.value, jobTitles: [e.target.value] })}
               className="text-indigo-400 text-sm bg-transparent border-none outline-none w-full"
-              placeholder="Job Title"
+              aria-label="Target job title" placeholder="Job Title"
             />
             <div className="flex flex-wrap gap-3 mt-2 text-ink/40 text-xs">
               {p.email && <span>✉ {p.email}</span>}
@@ -648,7 +582,7 @@ function ProfileStep({ profile, onNext }) {
 
       <button
         onClick={() => onNext(p)}
-        className="w-full py-4 rounded-xl font-bold text-black text-base"
+        className="w-full py-4 rounded-xl font-bold text-white text-base"
         style={{
           background: "linear-gradient(135deg, #6366F1, #4F46E5)",
           boxShadow: "0 0 30px rgba(99,102,241,0.3)",
@@ -662,85 +596,22 @@ function ProfileStep({ profile, onNext }) {
 }
 
 // ─── STEP 3: JOBS ─────────────────────────────────────────────────────────────
-function JobsStep({ profile, onApply }) {
+function JobsStep({ profile, onApply, applications }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);     // only the very first load — full-page spinner
   const [searching, setSearching] = useState(false); // subsequent re-searches — keeps old results visible
   const [filter, setFilter] = useState("all");
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [location, setLocation] = useState("all");
-  const [applied, setApplied] = useState({});
+  const applied = Object.fromEntries(applications.filter(app => app.id).map(app => [app.id, app.status || "opened"]));
   const [selected, setSelected] = useState(null);
-  const done = useRef(false);
-  const cache = useRef(new Map());  // location -> normalised jobs[], so re-visiting a location is instant
-  const abortRef = useRef(null);    // cancels a stale in-flight search when a newer one starts
+  const cache = useRef(new Map());
+  const abortRef = useRef(null);
+  const [searchError, setSearchError] = useState("");
 
-  const remote = isRemoteEligible(profile.title, profile.skills);
-
-  useEffect(() => {
-    if (done.current) return;
-    done.current = true;
-    generateJobs("all");
-  }, []);
-
-  // Normalise a raw JSearch result into our app's job shape
-  const normaliseJob = (item, index) => {
-    const boardMap = {
-      linkedin: "linkedin", indeed: "indeed", glassdoor: "glassdoor",
-      remoteok: "remoteok", wellfound: "wellfound", weworkremotely: "weworkremotely",
-    };
-    // Only claim a known board when the publisher name actually matches —
-    // never default unmatched sources (ZipRecruiter, a company's own careers
-    // page, Trabajo.org, etc.) to "Indeed". Show their real name instead.
-    const rawPublisher = (item.job_publisher || "").trim();
-    const sourceRaw = rawPublisher.toLowerCase();
-    const matchedBoard = Object.keys(boardMap).find((k) => sourceRaw.includes(k));
-    const board = matchedBoard || "other";
-    const boardLabel = matchedBoard ? null : (rawPublisher || "Company Site");
-    const isRemote = item.job_is_remote || false;
-    const postedTs = item.job_posted_at_timestamp;
-    const postedDays = postedTs
-      ? Math.max(1, Math.round((Date.now() / 1000 - postedTs) / 86400))
-      : Math.floor(Math.random() * 14) + 1;
-
-    // Calculate a rough match score based on skill overlap
-    const jobText = `${item.job_title} ${item.job_description || ""} ${(item.job_highlights?.Qualifications || []).join(" ")}`.toLowerCase();
-    const skillMatches = (profile.skills || []).filter((s) => jobText.includes(s.toLowerCase())).length;
-    const match = Math.min(98, 65 + skillMatches * 4 + Math.floor(Math.random() * 8));
-
-    return {
-      id: item.job_id || `job_${index}`,
-      title: item.job_title || "Role",
-      company: item.employer_name || "Company",
-      location: item.job_is_remote
-        ? "Remote"
-        : [item.job_city, item.job_country].filter(Boolean).join(", ") || "Location TBC",
-      type: item.job_employment_type
-        ? item.job_employment_type.replace("_", "-").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-        : "Full-time",
-      remote: isRemote,
-      salary: item.job_min_salary && item.job_max_salary
-        ? `${item.job_salary_currency || "$"}${Math.round(item.job_min_salary / 1000)}k – ${Math.round(item.job_max_salary / 1000)}k`
-        : item.job_salary_period ? `${item.job_salary_currency || ""}${item.job_min_salary || ""}${item.job_salary_period}` : "Salary not listed",
-      match,
-      board,
-      boardLabel,
-      applyUrl: item.job_apply_link || "",
-      description: item.job_description
-        ? item.job_description.slice(0, 180).trim() + "…"
-        : "See full listing for details.",
-      requirements: (item.job_highlights?.Qualifications || []).slice(0, 3),
-      postedDays,
-      industry: item.job_publisher || "General",
-      urgent: postedDays <= 3,
-      tags: [
-        isRemote ? "Remote" : "On-site",
-        item.job_employment_type === "FULLTIME" ? "Full-time" : item.job_employment_type || "Contract",
-      ],
-    };
-  };
-
-  const generateJobs = async (loc) => {
+  const generateJobs = useCallback(async (loc) => {
+    abortRef.current?.abort();
+    setSearchError("");
     // Instant path: we've already fetched this exact location this session
     if (cache.current.has(loc)) {
       setJobs(cache.current.get(loc));
@@ -756,7 +627,7 @@ function JobsStep({ profile, onApply }) {
     abortRef.current = controller;
 
     // Build search queries from profile job titles
-    const queries = (profile.jobTitles || [profile.title]).slice(0, 3);
+    const queries = (profile.jobTitles?.length ? profile.jobTitles : [profile.title]).filter(Boolean).slice(0, 3);
     const isRemoteLocation = loc === "Remote";
     // "Remote" isn't a real place — asking JSearch to geocode "in Remote"
     // returns poor/empty results. Use its dedicated remote filter instead.
@@ -767,12 +638,13 @@ function JobsStep({ profile, onApply }) {
     if (remoteEligible && !isRemoteLocation) queries.push(`${profile.title} remote`);
 
     try {
+      const headers = await authHeaders();
       // Fetch results for each query in parallel via our secure proxy
       const results = await Promise.allSettled(
         queries.map((q) =>
           fetch(`${PROXY_JOBS}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month${remoteParam}`, {
-            signal: controller.signal,
-          }).then((r) => r.json())
+            signal: controller.signal, headers,
+          }).then(async (r) => {const data = await r.json(); if (!r.ok) throw new Error(data.error || "The job service is unavailable."); return data;})
         )
       );
 
@@ -787,18 +659,20 @@ function JobsStep({ profile, onApply }) {
         if (r.status === "fulfilled" && Array.isArray(r.value?.data)) {
           r.value.data.forEach((item) => {
             const dupeKey = `${(item.job_title || "").toLowerCase()}|${(item.employer_name || "").toLowerCase()}`;
-            if (seenId.has(item.job_id) || seenTitleCompany.has(dupeKey)) return;
+            if ((item.job_id && seenId.has(item.job_id)) || seenTitleCompany.has(dupeKey)) return;
             seenId.add(item.job_id);
             seenTitleCompany.add(dupeKey);
-            allJobs.push(normaliseJob(item, allJobs.length));
+            allJobs.push(normalizeJob(item, allJobs.length, profile));
           });
         }
       });
 
-      if (allJobs.length === 0) throw new Error("No results returned from JSearch");
+      const failures = results.filter(result => result.status === "rejected");
+      if (!allJobs.length && failures.length) throw failures[0].reason;
+      if (failures.length) setSearchError("Some searches could not complete. These are the results we could retrieve.");
 
       // Sort by match score descending
-      allJobs.sort((a, b) => b.match - a.match);
+      allJobs.sort((a, b) => (b.match ?? -1) - (a.match ?? -1));
       cache.current.set(loc, allJobs);
       setJobs(allJobs);
       showToast(`Found ${allJobs.length} real job listings!`, "success");
@@ -806,20 +680,20 @@ function JobsStep({ profile, onApply }) {
       if (err.name === "AbortError") return; // superseded, not a real failure
       showToast(`Job search error: ${err.message?.slice(0, 80)}`, "error");
       console.error("generateJobs error:", err);
-      setJobs(sampleJobs(profile));
+      setSearchError(err.message || "Job search is unavailable. Please try again.");
+      setJobs([]);
     } finally {
       if (!controller.signal.aborted) {
         setLoading(false);
         setSearching(false);
       }
     }
-  };
+  }, [profile]);
 
-  const sampleJobs = (p) => [
-    { id: "1", title: p.jobTitles?.[0] || "Software Engineer", company: "TechCorp", location: "San Francisco, US", type: "Full-time", remote: true, salary: "$120k–$160k", match: 95, board: "linkedin", applyUrl: "", description: "Build scalable systems.", requirements: ["Python", "AWS", "SQL"], postedDays: 2, industry: "SaaS", urgent: true, tags: ["Remote", "Full-time"] },
-    { id: "2", title: p.jobTitles?.[1] || "Senior Developer", company: "GlobalBank", location: "London, UK", type: "Full-time", remote: false, salary: "£80k–£110k", match: 88, board: "indeed", applyUrl: "", description: "Lead development.", requirements: ["Java", "Spring", "CI/CD"], postedDays: 5, industry: "FinTech", urgent: false, tags: ["On-site", "Full-time"] },
-    { id: "3", title: p.jobTitles?.[2] || "Backend Developer", company: "Startup Inc", location: "Remote", type: "Contract", remote: true, salary: "$80k–$100k", match: 82, board: "remoteok", applyUrl: "", description: "Work on exciting backend systems.", requirements: ["Node.js", "PostgreSQL", "REST APIs"], postedDays: 7, industry: "Tech", urgent: false, tags: ["Remote", "Contract"] },
-  ];
+  useEffect(() => {
+    generateJobs("all");
+    return () => abortRef.current?.abort();
+  }, [generateJobs]);
 
   const boards = [...new Set(jobs.map((j) => j.board))];
   const filtered = jobs.filter((j) => {
@@ -839,10 +713,9 @@ function JobsStep({ profile, onApply }) {
     { value: "Netherlands", label: "🇳🇱 Netherlands" },
     { value: "UAE", label: "🇦🇪 UAE" },
     { value: "South Africa", label: "🇿🇦 South Africa" },
-    { value: "Remote", label: "💻 Remote (Anywhere)" },
+    { value: "Remote", label: "💻 Remote (check eligibility)" },
   ];
 
-  const getBoardColor = (id) => JOB_BOARDS.find((b) => b.id === id)?.color || "#888";
   const getBoardName = (id) => JOB_BOARDS.find((b) => b.id === id)?.name || id;
   // Prefer the job's real publisher name (e.g. "ZipRecruiter") over the
   // generic "Company Site" bucket used only for grouping/filtering.
@@ -850,9 +723,8 @@ function JobsStep({ profile, onApply }) {
 
   const markApplied = (jobId, method) => {
     const job = jobs.find((j) => j.id === jobId);
-    setApplied((prev) => ({ ...prev, [jobId]: method }));
     if (job) onApply(job, method); // ← saves to localStorage tracker
-    showToast(`Application ${method === "auto" ? "submitted" : "opened"} successfully!`, "success");
+    showToast("Job page opened. Mark it submitted in your tracker after you finish applying.", "info");
   };
 
   if (loading) {
@@ -866,23 +738,24 @@ function JobsStep({ profile, onApply }) {
   }
 
   if (selected) {
-    return <JobDetail job={selected} profile={profile} onBack={() => setSelected(null)} onApply={(method) => { markApplied(selected.id, method); setApplied((p) => ({...p, [selected.id]: method})); setSelected(null); }} applied={applied[selected.id]} />;
+    return <JobDetail job={selected} profile={profile} onBack={() => setSelected(null)} onApply={(method) => { markApplied(selected.id, method); setSelected(null); }} applied={applied[selected.id]} />;
   }
 
   return (
     <div className="max-w-4xl mx-auto">
+      {searchError && <p className="notice error" role="alert">{searchError}</p>}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-ink flex items-center gap-2" style={{ fontFamily: "'Playfair Display', serif" }}>
             {filtered.length} Job Matches
             {searching && <span className="text-xs font-sans font-normal text-indigo-400 animate-pulse">🔄 Updating…</span>}
           </h2>
-          <p className="text-ink/40 text-sm">Based on your profile · Sorted by match score</p>
+          <p className="text-ink/40 text-sm">Sorted by listed skill coverage · Not a hiring probability</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Location picker */}
           <select
-            value={location}
+            aria-label="Job search location" value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="px-4 py-2 rounded-xl bg-ink/5 border border-ink/10 text-ink/70 text-sm focus:outline-none focus:border-indigo-400/40"
           >
@@ -910,7 +783,7 @@ function JobsStep({ profile, onApply }) {
 
           {/* Board filter */}
           <select
-            value={filter}
+            aria-label="Job board filter" value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="px-4 py-2 rounded-xl bg-ink/5 border border-ink/10 text-ink/70 text-sm focus:outline-none focus:border-indigo-400/40"
           >
@@ -928,12 +801,14 @@ function JobsStep({ profile, onApply }) {
               applied[job.id] ? "opacity-60 border-ink/5" : "border-ink/8 hover:border-indigo-400/20 hover:bg-ink/3"
             }`}
             style={{ background: "var(--bg-card)", padding: "1.25rem 1.5rem" }}
+            role="button" tabIndex={0} aria-label={`View ${job.title} at ${job.company}`}
+            onKeyDown={e => {if (["Enter", " "].includes(e.key)) {e.preventDefault(); setSelected(job);}}}
             onClick={() => setSelected(job)}
           >
             <div className="flex flex-wrap gap-4 items-start">
               <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center text-xs font-bold text-black flex-shrink-0"
-                style={{ background: `linear-gradient(135deg, ${getBoardColor(job.board)}, ${getBoardColor(job.board)}99)` }}
+                className="w-12 h-12 rounded-xl flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                style={{ background: "#0b1e3d" }}
               >
                 {job.company?.substring(0, 2).toUpperCase()}
               </div>
@@ -941,7 +816,7 @@ function JobsStep({ profile, onApply }) {
                 <div className="flex flex-wrap items-start gap-2 mb-1">
                   <span className="text-ink font-semibold group-hover:text-indigo-300 transition-colors">{job.title}</span>
                   {job.urgent && <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs">🔥 Urgent</span>}
-                  {applied[job.id] && <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs">✓ Applied</span>}
+                  {applied[job.id] && <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs">{applied[job.id] === "submitted" ? "✓ Submitted" : "↗ Opened"}</span>}
                 </div>
                 <div className="text-ink/50 text-sm mb-2">{job.company} · {job.location} · {job.type}</div>
                 <div className="flex flex-wrap gap-2">
@@ -955,11 +830,11 @@ function JobsStep({ profile, onApply }) {
                   className="text-lg font-bold font-mono"
                   style={{ color: job.match >= 90 ? "var(--match-hi)" : job.match >= 75 ? "var(--match-mid)" : "#F59E0B" }}
                 >
-                  {job.match}%
+                  {job.match === null ? "—" : `${job.match}%`}
                 </div>
-                <div className="text-ink/30 text-xs">match</div>
+                <div className="text-ink/30 text-xs">skill coverage</div>
                 <div className="text-ink/50 text-xs mt-1">{job.salary}</div>
-                <div className="text-ink/25 text-xs">{job.postedDays}d ago</div>
+                <div className="text-ink/25 text-xs">{job.postedDays === null ? "Date not listed" : `${job.postedDays}d ago`}</div>
               </div>
             </div>
           </div>
@@ -979,11 +854,14 @@ function JobsStep({ profile, onApply }) {
 // ─── JOB DETAIL & APPLY ───────────────────────────────────────────────────────
 function JobDetail({ job, profile, onBack, onApply, applied }) {
   const [tab, setTab] = useState("details");
-  const [coverLetter, setCoverLetter] = useState("");
+  const [coverLetter, setCoverLetter] = useState(() => load(`jobai_letter_${job.id}`, ""));
   const [generating, setGenerating] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailCopy, setEmailCopy] = useState(false);
   // Three-stage apply flow: idle → reviewing → done
   const [applyStage, setApplyStage] = useState("idle");
+
+  useEffect(() => {save(`jobai_letter_${job.id}`, coverLetter);}, [job.id, coverLetter]);
 
   const board = JOB_BOARDS.find((b) => b.id === job.board) || JOB_BOARDS.find((b) => b.id === "other");
   const boardName = job.boardLabel || board.name;
@@ -995,7 +873,7 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
     setTab("coverletter");
     try {
       const letter = await callClaude({
-        system: "You are an expert career coach. Write concise, impactful cover letters.",
+        operation: "coverletter",
         userContent: `Write a compelling cover letter for this application:
 
 Job: ${job.title} at ${job.company}
@@ -1029,36 +907,36 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
   const oneClickApply = async () => {
     if (!coverLetter) { showToast("Generate and review your cover letter first", "warning"); return; }
 
-    // 1. Copy cover letter to clipboard
-    try { await navigator.clipboard.writeText(coverLetter); } catch {}
+    // Open during the user gesture, before asynchronous clipboard permission.
+    window.open(applyUrl, "_blank", "noopener,noreferrer");
+    // Copy the reviewed letter.
+    try { await navigator.clipboard.writeText(coverLetter); } catch {showToast("Clipboard access failed. Copy the letter from the editable text box.", "warning");}
 
-    // 2. Open the real job posting
-    window.open(applyUrl, "_blank");
 
     // 3. Mark as applied
     onApply("assisted");
 
     // 4. Send real confirmation email
-    if (profile.email) {
+    if (emailCopy && profile.email) {
       setSendingEmail(true);
       try {
-        await sendEmail({
+        const delivered = await sendEmail({
           toEmail: profile.email,
           toName:  profile.name,
           jobTitle: job.title,
           company:  job.company,
           board:    boardName,
           date:     new Date().toLocaleDateString(),
-          message:  `You used JobAI's one-click assist to apply for ${job.title} at ${job.company}. Your cover letter was copied to your clipboard and the job page was opened for you to paste and submit.`,
+          message:  `You prepared a letter for ${job.title} at ${job.company}. Submit it on the employer’s site when you are ready.\n\n${coverLetter}`,
         });
-        showToast(`✓ Job page opened & cover letter copied! Confirmation sent to ${profile.email}`, "success");
+        showToast(`Job page opened. Review the clipboard before pasting. ${delivered ? `Letter emailed to ${profile.email}` : "Email notifications are not connected"}`, "success");
       } catch {
-        showToast("✓ Job page opened & cover letter copied! (Email delivery failed — check EmailJS config)", "warning");
+        showToast("Job page opened. Review the clipboard before pasting. (Email delivery failed — check EmailJS config)", "warning");
       } finally {
         setSendingEmail(false);
       }
     } else {
-      showToast("✓ Job page opened & cover letter copied to clipboard — paste it and submit!", "success");
+      showToast("Job page opened — copy your letter, paste it, and submit on the employer’s site.", "success");
     }
 
     setApplyStage("done");
@@ -1066,9 +944,9 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
 
   // Plain manual apply — opens job page, marks applied, sends email
   const manualApply = async () => {
-    window.open(applyUrl, "_blank");
+    window.open(applyUrl, "_blank", "noopener,noreferrer");
     onApply("manual");
-    if (profile.email) {
+    if (emailCopy && profile.email) {
       try {
         await sendEmail({
           toEmail: profile.email,
@@ -1079,7 +957,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           date:     new Date().toLocaleDateString(),
           message:  `You opened the application for ${job.title} at ${job.company} on ${boardName}.`,
         });
-      } catch {}
+      } catch { /* Storage or optional notifications may be unavailable. */ }
     }
     showToast(`Opened ${boardName} — good luck!`, "info");
   };
@@ -1097,8 +975,8 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
       >
         <div className="flex flex-wrap gap-4 items-start mb-4">
           <div
-            className="w-14 h-14 rounded-2xl flex items-center justify-center text-sm font-bold text-black"
-            style={{ background: `linear-gradient(135deg, ${board.color}, ${board.color}99)` }}
+            className="w-14 h-14 rounded-2xl flex items-center justify-center text-sm font-bold text-white"
+            style={{ background: "#0b1e3d" }}
           >
             {job.company?.substring(0, 2).toUpperCase()}
           </div>
@@ -1114,9 +992,9 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold font-mono" style={{ color: job.match >= 90 ? "var(--match-hi)" : job.match >= 75 ? "var(--match-mid)" : "#F59E0B" }}>
-              {job.match}%
+              {job.match === null ? "—" : `${job.match}%`}
             </div>
-            <div className="text-ink/30 text-xs">match score</div>
+            <div className="text-ink/30 text-xs">listed skill coverage</div>
             <div className="text-ink/60 text-sm font-mono mt-1">{job.salary}</div>
           </div>
         </div>
@@ -1124,7 +1002,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         {/* Apply actions */}
         {applied ? (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
-            ✓ You already applied to this position
+            {applied === "submitted" ? "✓ You confirmed that you submitted this application." : "↗ You opened this listing. Submission happens on the employer’s site."}
           </div>
         ) : applyStage === "done" ? (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
@@ -1153,14 +1031,14 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
               <button
                 onClick={oneClickApply}
                 disabled={sendingEmail}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-black text-sm font-bold transition-all"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all"
                 style={{ background: "linear-gradient(135deg, #6366F1, #4F46E5)", boxShadow: "0 0 20px rgba(99,102,241,0.3)" }}
               >
-                {sendingEmail ? "Sending email…" : "⚡ One-Click Assist"}
+                {sendingEmail ? "Sending email…" : "Open listing & copy letter"}
               </button>
             </div>
             <p className="text-ink/25 text-xs mt-3">
-              ⚡ One-Click Assist opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
+              Open listing & copy letter opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
             </p>
           </div>
         ) : (
@@ -1182,6 +1060,8 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           </div>
         )}
       </div>
+
+      {profile.email && <label className="consent"><input type="checkbox" checked={emailCopy} onChange={event => setEmailCopy(event.target.checked)} />Email a copy of my preparation to {profile.email} when I open the listing.</label>}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 bg-ink/3 rounded-xl p-1">
@@ -1205,7 +1085,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
             <h3 className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">About the Role</h3>
             <p className="text-ink/70 text-sm leading-relaxed mb-6">{job.description}</p>
             <div className="grid grid-cols-2 gap-4 text-sm">
-              {[["Industry", job.industry], ["Posted", `${job.postedDays} days ago`], ["Location", job.location], ["Type", job.type]].map(([k, v]) => (
+              {[["Industry", job.industry], ["Posted", job.postedDays === null ? "Not listed" : `${job.postedDays} days ago`], ["Location", job.location], ["Type", job.type]].map(([k, v]) => (
                 <div key={k} className="bg-ink/3 rounded-xl p-3">
                   <div className="text-ink/30 text-xs mb-1">{k}</div>
                   <div className="text-ink/80">{v}</div>
@@ -1242,13 +1122,13 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                 <textarea
                   value={coverLetter}
                   onChange={(e) => setCoverLetter(e.target.value)}
-                  rows={14}
+                  aria-label="Editable cover letter" rows={14}
                   className="w-full bg-ink/3 border border-ink/8 rounded-xl text-ink/80 text-sm leading-relaxed p-4 resize-none focus:outline-none focus:border-indigo-400/30"
                   style={{ fontFamily: "'Outfit', sans-serif" }}
                 />
                 <div className="flex gap-3 mt-3">
                   <button
-                    onClick={() => { navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success"); }}
+                    onClick={async () => { try {await navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success");} catch {showToast("Clipboard access failed. Copy the text from the letter above.", "warning");} }}
                     className="px-4 py-2 rounded-xl bg-ink/8 text-ink/60 text-sm hover:bg-ink/12 transition-all"
                   >
                     📋 Copy
@@ -1264,10 +1144,10 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                     <button
                       onClick={oneClickApply}
                       disabled={sendingEmail}
-                      className="ml-auto px-4 py-2 rounded-xl text-black text-sm font-bold"
+                      className="ml-auto px-4 py-2 rounded-xl text-white text-sm font-bold"
                       style={{ background: "linear-gradient(135deg, #6366F1, #4F46E5)" }}
                     >
-                      {sendingEmail ? "Sending…" : "⚡ Apply Now"}
+                      {sendingEmail ? "Sending…" : "Open listing & copy letter"}
                     </button>
                   )}
                 </div>
@@ -1293,7 +1173,24 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
 }
 
 // ─── TRACKER PANEL ────────────────────────────────────────────────────────────
-function TrackerPanel({ applications, onClose }) {
+function TrackerPanel({ applications, onClose, onStatusChange, onDelete }) {
+  const panelRef = useRef(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    panelRef.current?.focus();
+    const keydown = event => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "Tab") {
+        const controls = panelRef.current?.querySelectorAll("button, select");
+        if (!controls?.length) return;
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {event.preventDefault(); last.focus();}
+        else if (!event.shiftKey && document.activeElement === last) {event.preventDefault(); first.focus();}
+      }
+    };
+    document.addEventListener("keydown", keydown);
+    return () => {document.removeEventListener("keydown", keydown); previous?.focus();};
+  }, [onClose]);
   const statuses = { manual: "Opened listing", assisted: "One-click assisted" };
   return (
     <div
@@ -1302,14 +1199,15 @@ function TrackerPanel({ applications, onClose }) {
       onClick={onClose}
     >
       <div
+        ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="tracker-title" tabIndex={-1}
         className="w-full max-w-sm h-full overflow-y-auto"
         style={{ background: "var(--bg-panel)", borderLeft: "1px solid var(--border-soft)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-ink font-bold text-lg" style={{ fontFamily: "'Playfair Display', serif" }}>Applications</h3>
-            <button onClick={onClose} className="text-ink/40 hover:text-ink text-xl transition-colors">×</button>
+            <h3 className="text-ink font-bold text-lg" style={{ fontFamily: "'Playfair Display', serif" }} id="tracker-title">Application activity</h3>
+            <button aria-label="Close application activity" onClick={onClose} className="text-ink/40 hover:text-ink text-xl transition-colors">×</button>
           </div>
           {applications.length === 0 ? (
             <div className="text-center py-12 text-ink/30 text-sm">No applications yet</div>
@@ -1321,10 +1219,11 @@ function TrackerPanel({ applications, onClose }) {
                   <div className="text-ink/50 text-xs">{app.company}</div>
                   <div className="flex items-center justify-between mt-2">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${app.method === "auto" ? "bg-indigo-500/20 text-indigo-300" : "bg-violet-500/20 text-violet-300"}`}>
-                      {statuses[app.method]}
+                      {app.status === "submitted" ? "Submitted (confirmed by you)" : statuses[app.method] || "Opened listing"}
                     </span>
                     <span className="text-ink/25 text-xs">{app.date}</span>
                   </div>
+                  <div className="flex flex-wrap gap-3 mt-3"><button className="text-link" onClick={() => onStatusChange(i, app.status === "submitted" ? "opened" : "submitted")}>{app.status === "submitted" ? "Mark as opened" : "I submitted this application"}</button><button className="text-link" aria-label={`Delete ${app.title} from activity`} onClick={() => onDelete(i)}>Delete</button></div>
                 </div>
               ))}
             </div>
@@ -1337,16 +1236,17 @@ function TrackerPanel({ applications, onClose }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 // Tiny localStorage helpers
-const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* Storage or optional notifications may be unavailable. */ } };
 const load = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 
 // Theme: "light" | "dark" | "system". Persists to localStorage and, in
 // "system" mode, stays in sync with the OS/browser preference live —
 // no reload needed if the person flips their system theme mid-session.
-function useTheme() {
+function useTheme(enabled = true) {
   const [theme, setTheme] = useState(() => load("jobai_theme", "system"));
 
   useEffect(() => {
+    if (!enabled) return;
     const root = document.documentElement;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
@@ -1361,18 +1261,19 @@ function useTheme() {
       media.addEventListener("change", apply);
       return () => media.removeEventListener("change", apply);
     }
-  }, [theme]);
+  }, [theme, enabled]);
 
   return [theme, setTheme];
 }
 
-export default function App() {
-  const [theme, setTheme] = useTheme();
-  const [step, setStep] = useState(() => load("jobai_step", 0));
+export default function App({ embedded = false, forceUpload = false, onProfileParsed }) {
+  const [theme, setTheme] = useTheme(!embedded);
+  const [step, setStep] = useState(() => forceUpload ? 0 : load("jobai_step", 0));
   const [uploadData, setUploadData] = useState(null);
   const [profile, setProfile] = useState(() => load("jobai_profile", null));
   const [applications, setApplications] = useState(() => load("jobai_applications", []));
   const [showTracker, setShowTracker] = useState(false);
+  const closeTracker = useCallback(() => setShowTracker(false), []);
 
   const handleUpload = (data) => {
     setUploadData(data);
@@ -1382,6 +1283,7 @@ export default function App() {
 
   const handleParsed = (parsedProfile) => {
     if (!parsedProfile) { setStep(0); return; }
+    if (onProfileParsed) {onProfileParsed(parsedProfile); return;}
     setProfile(parsedProfile);
     save("jobai_profile", parsedProfile);
     setStep(2);
@@ -1399,35 +1301,38 @@ export default function App() {
 
   const handleApply = (job, method) => {
     const app = {
+      id: job.id,
       title: job.title,
       company: job.company,
       method,
+      status: "opened",
       date: new Date().toLocaleDateString(),
       board: job.board,
       applyUrl: job.applyUrl || "",
     };
     setApplications((prev) => {
-      const updated = [app, ...prev];
+      const updated = [app, ...prev.filter(previous => previous.id !== app.id)];
       save("jobai_applications", updated);
-      if (updated.length === 1) showToast("Application tracker updated!", "info");
+
       return updated;
     });
   };
 
   // Let user start fresh — clears everything
+  const handleStatusChange = (index, status) => {setApplications(previous => {const updated = previous.map((app, i) => i === index ? {...app, status} : app); save("jobai_applications", updated); return updated;});};
+  const handleDelete = index => {setApplications(previous => {const updated = previous.filter((_, i) => i !== index); save("jobai_applications", updated); return updated;});};
+
   const handleReset = () => {
-    ["jobai_step", "jobai_profile", "jobai_applications"].forEach((k) => localStorage.removeItem(k));
+    ["jobai_step", "jobai_profile"].forEach((k) => localStorage.removeItem(k));
     setStep(0);
     setProfile(null);
-    setApplications([]);
     setUploadData(null);
-    showToast("Started fresh — upload a new CV anytime.", "info");
+    showToast("Ready for another CV. Your application activity is still saved.", "info");
   };
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -1449,13 +1354,13 @@ export default function App() {
         }}
       >
         {/* Navbar */}
-        <nav
+        {!embedded && <nav
           className="flex items-center justify-between px-6 py-4 sticky top-0 z-30"
           style={{ background: "var(--bg-nav)", backdropFilter: "blur(16px)", borderBottom: "1px solid var(--border-faint)" }}
         >
           <div className="flex items-center gap-3">
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-black"
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
               style={{ background: "linear-gradient(135deg, #6366F1, #7C3AED)" }}
             >
               J
@@ -1495,10 +1400,11 @@ export default function App() {
               📋 {applications.length > 0 && <span className="text-indigo-400 font-bold">{applications.length}</span>} Applications
             </button>
           </div>
-        </nav>
+        </nav>}
 
         {/* Main Content */}
-        <main className="px-4 py-10 max-w-5xl mx-auto fade-in">
+        <main id="main-content" className="px-4 py-10 max-w-5xl mx-auto fade-in">
+          {embedded && <div className="flex flex-wrap justify-end gap-3 mb-6"><button className="button secondary" onClick={() => setShowTracker(true)}>Application activity ({applications.length})</button><button className="text-link" onClick={handleReset}>Upload another CV</button></div>}
           <StepIndicator current={step} />
 
           {step === 0 && <UploadStep onNext={handleUpload} />}
@@ -1510,6 +1416,7 @@ export default function App() {
           {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
           {step === 3 && profile && (
             <JobsStep
+              applications={applications}
               profile={profile}
               onApply={(job, method) => handleApply(job, method)}
             />
@@ -1519,11 +1426,11 @@ export default function App() {
         </main>
 
         {/* Footer */}
-        <footer className="text-center py-8 text-ink/15 text-xs border-t border-ink/5 mt-8">
+        {!embedded && <footer className="text-center py-8 text-ink/15 text-xs border-t border-ink/5 mt-8">
           JobAI by Philos Digital Labs · Powered by Groq AI (Free) · Searches LinkedIn, Indeed, Glassdoor, RemoteOK, Wellfound & more
-        </footer>
+        </footer>}
 
-        {showTracker && <TrackerPanel applications={applications} onClose={() => setShowTracker(false)} />}
+        {showTracker && <TrackerPanel applications={applications} onClose={closeTracker} onStatusChange={handleStatusChange} onDelete={handleDelete} />}
         <ToastContainer />
       </div>
     </>

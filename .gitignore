@@ -23,3 +23,10 @@ Thumbs.db
 # Build
 dist/
 dist-ssr/
+
+# Local deployment tooling and credentials
+.vercel/
+jobai
+*.pem
+playwright-report/
+test-results/
