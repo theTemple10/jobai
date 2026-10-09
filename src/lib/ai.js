@@ -1,10 +1,9 @@
 import { supabase } from './supabase.js';
 
 export async function requestAI(body, signal) {
-  const session = supabase ? (await supabase.auth.getSession()).data.session : null;
   const response = await fetch('/api/groq', {
     method: 'POST', signal: signal || AbortSignal.timeout(60000),
-    headers: {'Content-Type': 'application/json', ...(session ? {Authorization: `Bearer ${session.access_token}`} : {})},
+    headers: {'Content-Type': 'application/json', ...await authHeaders()},
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));

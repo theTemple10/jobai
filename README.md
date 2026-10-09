@@ -61,7 +61,7 @@ src/lib/exportResume.js   PDF, Word, and plain-text exports
 src/lib/parseDocument.js  PDF and DOCX text extraction
 src/lib/jobs.js           Deterministic job normalization and profile validation
 src/lib/supabase.js       Public client and account CV queries (RLS protected)
-src/index.jsx            Existing job discovery, cover letters, local activity
+src/JobSearch.jsx         Job discovery, cover letters, local activity
 api/                     Vercel provider endpoints
 server/protection.js     Verified account identity and shared hourly quotas
 supabase/migrations/     CV ownership policies and atomic usage counters
