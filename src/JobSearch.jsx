@@ -35,6 +35,27 @@ const REMOTE_PROFESSIONS = [
   "translator", "editor", "photographer", "video", "copywriter", "support",
 ];
 
+const CV_PARSE_PROMPT = `Parse this CV/resume and return ONLY valid JSON (no markdown, no backticks):
+{
+  "name": "Full Name",
+  "email": "email or null",
+  "phone": "phone or null",
+  "location": "City, Country or null",
+  "title": "Current/Target Job Title",
+  "summary": "2-sentence professional summary",
+  "skills": ["skill1", "skill2"],
+  "experience": [{ "role": "Title", "company": "Company", "duration": "2020-2023", "highlights": ["key achievement"] }],
+  "education": [{ "degree": "BSc Computer Science", "institution": "University Name", "year": "2019" }],
+  "languages": ["English"],
+  "certifications": [],
+  "jobTitles": ["5 relevant job titles to search for"],
+  "seniority": "Junior|Mid|Senior|Lead|Director",
+  "isRemoteEligible": true,
+  "industries": ["relevant industries"],
+  "keyStrengths": ["strength1", "strength2", "strength3"],
+  "salaryExpectation": null
+}`;
+
 const STEPS = ["Upload CV", "Analysis", "Profile", "Explore & prepare"];
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
@@ -99,33 +120,7 @@ function ToastContainer() {
   );
 }
 
-// ─── API CALL (via secure server proxy — keys never in browser) ──────────────
-async function callClaude({ userContent, useVision = false, operation = "parse", signal }) {
-  // Build message content for Groq (OpenAI-compatible format)
-  let messageContent;
-  if (typeof userContent === "string") {
-    messageContent = userContent;
-  } else if (Array.isArray(userContent)) {
-    if (useVision) {
-      messageContent = userContent.map((block) => {
-        if (block.type === "text") return { type: "text", text: block.text };
-        if (block.type === "image") {
-          return {
-            type: "image_url",
-            image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
-          };
-        }
-        return { type: "text", text: block.text || "" };
-      });
-    } else {
-      messageContent = userContent.map((b) => b.text || b.cvText || "").join("\n\n");
-    }
-  }
-
-  return requestAI({operation, useVision, messages: [{role: "user", content: messageContent}]}, signal);
-}
-
-// ─── EMAIL (EmailJS — real delivery, free) ───────────────────────────────────
+// ─── OPTIONAL EMAIL (EmailJS) ───────────────────────────────────
 async function sendEmail({ toEmail, toName, jobTitle, company, board, date, message }) {
   if (!EJS_SERVICE || !EJS_TEMPLATE || !EJS_KEY) {
     console.warn("EmailJS not configured — skipping email.");
@@ -319,27 +314,8 @@ function ParsingStep({ file, prompt, onDone }) {
           // Image CV → use vision model with base64
           const base64 = await fileToBase64(file);
           userContent = [
-            { type: "image", source: { type: "base64", media_type: file.type || (file.name.toLowerCase().endsWith(".png") ? "image/png" : file.name.toLowerCase().endsWith(".webp") ? "image/webp" : "image/jpeg"), data: base64 } },
-            { type: "text", text: `Parse this CV/resume image and return ONLY valid JSON (no markdown, no backticks):
-{
-  "name": "Full Name",
-  "email": "email or null",
-  "phone": "phone or null",
-  "location": "City, Country or null",
-  "title": "Current/Target Job Title",
-  "summary": "2-sentence professional summary",
-  "skills": ["skill1", "skill2"],
-  "experience": [{ "role": "Title", "company": "Company", "duration": "2020-2023", "highlights": ["key achievement"] }],
-  "education": [{ "degree": "BSc Computer Science", "institution": "University Name", "year": "2019" }],
-  "languages": ["English"],
-  "certifications": [],
-  "jobTitles": ["5 relevant job titles to search for"],
-  "seniority": "Junior|Mid|Senior|Lead|Director",
-  "isRemoteEligible": true,
-  "industries": ["relevant industries"],
-  "keyStrengths": ["strength1", "strength2", "strength3"],
-  "salaryExpectation": null
-}
+            { type: "image_url", image_url: { url: `data:${file.type || (file.name.toLowerCase().endsWith(".png") ? "image/png" : file.name.toLowerCase().endsWith(".webp") ? "image/webp" : "image/jpeg")};base64,${base64}` } },
+            { type: "text", text: `${CV_PARSE_PROMPT}
 Additional context: ${prompt || "None provided"}` },
           ];
         } else {
@@ -354,47 +330,21 @@ Additional context: ${prompt || "None provided"}` },
             cvText = await extractPdfText(file);
             if (!cvText || cvText.length < 50) throw new Error("Could not extract text from PDF. Please try saving it as an image (PNG) and uploading that instead.");
           }
-          userContent = [
-            {
-              type: "text",
-              text: `Here is the full text content of a CV/resume. Parse it and return ONLY valid JSON (no markdown, no backticks):
-{
-  "name": "Full Name",
-  "email": "email or null",
-  "phone": "phone or null",
-  "location": "City, Country or null",
-  "title": "Current/Target Job Title",
-  "summary": "2-sentence professional summary",
-  "skills": ["skill1", "skill2"],
-  "experience": [{ "role": "Title", "company": "Company", "duration": "2020-2023", "highlights": ["key achievement"] }],
-  "education": [{ "degree": "BSc Computer Science", "institution": "University Name", "year": "2019" }],
-  "languages": ["English"],
-  "certifications": [],
-  "jobTitles": ["5 relevant job titles to search for"],
-  "seniority": "Junior|Mid|Senior|Lead|Director",
-  "isRemoteEligible": true,
-  "industries": ["relevant industries"],
-  "keyStrengths": ["strength1", "strength2", "strength3"],
-  "salaryExpectation": null
-}
+          userContent = `${CV_PARSE_PROMPT}
 
 CV TEXT:
 ${cvText}
 
-Additional context: ${prompt || "None provided"}`,
-            },
-          ];
+Additional context: ${prompt || "None provided"}`;
         }
 
         if (!active) return;
         setStatus("AI is organizing the extracted information…");
-        const raw = await callClaude({
-          system: "You are an expert CV parser. Return only valid JSON, no markdown fences, no explanation.",
-          userContent,
-          maxTokens: 1500,
+        const raw = await requestAI({
+          operation: "parse",
+          messages: [{role: "user", content: userContent}],
           useVision: isImage,
-          signal: controller.signal,
-        });
+        }, controller.signal);
 
         if (!active) return;
         setProgress(100);
@@ -442,7 +392,7 @@ Additional context: ${prompt || "None provided"}`,
       <div className="text-ink/40 text-sm font-mono animate-pulse">{status}</div>
       <div className="mt-8 flex justify-center gap-2">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="w-2 h-2 rounded-full bg-indigo-400" style={{ animation: `bounce 1.2s ${i * 0.2}s infinite` }} />
+          <div key={i} className="w-2 h-2 rounded-full bg-indigo-400" style={{ animation: `cvBounce 1.2s ${i * 0.2}s infinite` }} />
         ))}
       </div>
     </div>
@@ -620,9 +570,6 @@ function JobsStep({ profile, onApply, applications }) {
       return;
     }
 
-    // Cancel a still-in-flight search so a slow older response can never
-    // clobber a newer one (e.g. rapidly switching locations)
-    abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -859,7 +806,7 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailCopy, setEmailCopy] = useState(false);
   // Three-stage apply flow: idle → reviewing → done
-  const [applyStage, setApplyStage] = useState("idle");
+  const [reviewing, setReviewing] = useState(false);
 
   useEffect(() => {save(`jobai_letter_${job.id}`, coverLetter);}, [job.id, coverLetter]);
 
@@ -872,9 +819,9 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
     setGenerating(true);
     setTab("coverletter");
     try {
-      const letter = await callClaude({
+      const letter = await requestAI({
         operation: "coverletter",
-        userContent: `Write a compelling cover letter for this application:
+        messages: [{role: "user", content: `Write a compelling cover letter for this application:
 
 Job: ${job.title} at ${job.company}
 Location: ${job.location}
@@ -888,11 +835,10 @@ Skills: ${(profile.skills || []).slice(0, 8).join(", ")}
 Experience: ${(profile.experience || []).map((e) => `${e.role} at ${e.company} (${e.duration})`).join("; ")}
 Key Strengths: ${(profile.keyStrengths || []).join(", ")}
 
-Write a 3-paragraph cover letter. Professional, specific, compelling. Address to Hiring Manager.`,
-        maxTokens: 700,
+Write a 3-paragraph cover letter. Professional, specific, compelling. Address to Hiring Manager.`}],
       });
       setCoverLetter(letter);
-      setApplyStage("reviewing");
+      setReviewing(true);
       showToast("Cover letter ready — review and edit before applying", "success");
     } catch (err) {
       showToast(`Cover letter error: ${err.message?.slice(0, 80)}`, "error");
@@ -913,10 +859,10 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
     try { await navigator.clipboard.writeText(coverLetter); } catch {showToast("Clipboard access failed. Copy the letter from the editable text box.", "warning");}
 
 
-    // 3. Mark as applied
+    // Record that the listing was opened
     onApply("assisted");
 
-    // 4. Send real confirmation email
+    // Send an optional copy of the prepared letter
     if (emailCopy && profile.email) {
       setSendingEmail(true);
       try {
@@ -939,10 +885,9 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
       showToast("Job page opened — copy your letter, paste it, and submit on the employer’s site.", "success");
     }
 
-    setApplyStage("done");
   };
 
-  // Plain manual apply — opens job page, marks applied, sends email
+  // Open the listing and record activity, with an optional email copy.
   const manualApply = async () => {
     window.open(applyUrl, "_blank", "noopener,noreferrer");
     onApply("manual");
@@ -1004,11 +949,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
             {applied === "submitted" ? "✓ You confirmed that you submitted this application." : "↗ You opened this listing. Submission happens on the employer’s site."}
           </div>
-        ) : applyStage === "done" ? (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
-            ✓ Application assisted — job page opened, cover letter copied to clipboard
-          </div>
-        ) : applyStage === "reviewing" ? (
+        ) : reviewing ? (
           // Stage 2: cover letter is ready, show final action buttons
           <div>
             <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm mb-3">
@@ -1140,7 +1081,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                   >
                     {generating ? "Regenerating…" : "↺ Regenerate"}
                   </button>
-                  {applyStage === "reviewing" && (
+                  {reviewing && (
                     <button
                       onClick={oneClickApply}
                       disabled={sendingEmail}
@@ -1234,40 +1175,12 @@ function TrackerPanel({ applications, onClose, onStatusChange, onDelete }) {
   );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+// ─── JOB WORKFLOW ─────────────────────────────────────────────────────────────
 // Tiny localStorage helpers
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* Storage or optional notifications may be unavailable. */ } };
 const load = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 
-// Theme: "light" | "dark" | "system". Persists to localStorage and, in
-// "system" mode, stays in sync with the OS/browser preference live —
-// no reload needed if the person flips their system theme mid-session.
-function useTheme(enabled = true) {
-  const [theme, setTheme] = useState(() => load("jobai_theme", "system"));
-
-  useEffect(() => {
-    if (!enabled) return;
-    const root = document.documentElement;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      const isDark = theme === "system" ? media.matches : theme === "dark";
-      root.classList.toggle("dark", isDark);
-    };
-
-    apply();
-    save("jobai_theme", theme);
-
-    if (theme === "system") {
-      media.addEventListener("change", apply);
-      return () => media.removeEventListener("change", apply);
-    }
-  }, [theme, enabled]);
-
-  return [theme, setTheme];
-}
-
-export default function App({ embedded = false, forceUpload = false, onProfileParsed }) {
-  const [theme, setTheme] = useTheme(!embedded);
+export default function JobSearch({ forceUpload = false, onProfileParsed }) {
   const [step, setStep] = useState(() => forceUpload ? 0 : load("jobai_step", 0));
   const [uploadData, setUploadData] = useState(null);
   const [profile, setProfile] = useState(() => load("jobai_profile", null));
@@ -1318,7 +1231,7 @@ export default function App({ embedded = false, forceUpload = false, onProfilePa
     });
   };
 
-  // Let user start fresh — clears everything
+  // Application activity is independent of the current CV.
   const handleStatusChange = (index, status) => {setApplications(previous => {const updated = previous.map((app, i) => i === index ? {...app, status} : app); save("jobai_applications", updated); return updated;});};
   const handleDelete = index => {setApplications(previous => {const updated = previous.filter((_, i) => i !== index); save("jobai_applications", updated); return updated;});};
 
@@ -1332,107 +1245,31 @@ export default function App({ embedded = false, forceUpload = false, onProfilePa
 
   return (
     <>
-      <style>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
-        @keyframes slideInToast { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        .fade-in { animation: fadeIn 0.4s ease forwards; }
-        select option { background: var(--select-bg); color: var(--select-fg); }
-      `}</style>
+      {/* Main Content */}
+      <main id="main-content" className="px-4 py-10 max-w-5xl mx-auto fade-in">
+        <div className="flex flex-wrap justify-end gap-3 mb-6"><button className="button secondary" onClick={() => setShowTracker(true)}>Application activity ({applications.length})</button><button className="text-link" onClick={handleReset}>Upload another CV</button></div>
+        <StepIndicator current={step} />
 
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "radial-gradient(ellipse 80% 50% at 50% -20%, var(--bg-glow) 0%, transparent 60%), var(--bg-app)",
-          fontFamily: "'Outfit', sans-serif",
-          color: "rgb(var(--ink))",
-          transition: "background-color 0.25s ease, color 0.25s ease",
-        }}
-      >
-        {/* Navbar */}
-        {!embedded && <nav
-          className="flex items-center justify-between px-6 py-4 sticky top-0 z-30"
-          style={{ background: "var(--bg-nav)", backdropFilter: "blur(16px)", borderBottom: "1px solid var(--border-faint)" }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
-              style={{ background: "linear-gradient(135deg, #6366F1, #7C3AED)" }}
-            >
-              J
-            </div>
-            <span className="font-bold text-ink text-lg" style={{ fontFamily: "'Playfair Display', serif" }}>JobAI</span>
-            <span className="text-ink/30 text-xs hidden sm:block">by Philos Digital Labs</span>
-          </div>
+        {step === 0 && <UploadStep onNext={handleUpload} />}
+        {step === 1 && uploadData && (
+          <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} />
+        )}
+        {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
+        {step === 1 && !uploadData && <UploadStep onNext={handleUpload} />}
+        {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
+        {step === 3 && profile && (
+          <JobsStep
+            applications={applications}
+            profile={profile}
+            onApply={handleApply}
+          />
+        )}
+        {/* If step=2 or 3 but profile lost somehow, go back to upload */}
+        {(step === 2 || step === 3) && !profile && <UploadStep onNext={handleUpload} />}
+      </main>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex gap-2 text-xs text-ink/30 items-center">
-              {JOB_BOARDS.slice(0, 4).map((b) => (
-                <span key={b.id} className="px-2 py-1 rounded-md bg-ink/4 border border-ink/6" style={{ color: b.color + "99" }}>
-                  {b.name}
-                </span>
-              ))}
-            </div>
-            <button
-              onClick={() => setTheme((t) => (t === "system" ? "light" : t === "light" ? "dark" : "system"))}
-              title={`Theme: ${{ system: "Auto (matches your device)", light: "Light", dark: "Dark" }[theme]} — click to change`}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all bg-ink/6 border border-ink/10 hover:border-ink/25 text-ink/60 hover:text-ink"
-            >
-              {{ system: "🖥️", light: "☀️", dark: "🌙" }[theme]}
-              <span className="hidden sm:inline">{{ system: "Auto", light: "Light", dark: "Dark" }[theme]}</span>
-            </button>
-            {step > 0 && (
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-ink/4 border border-ink/8 hover:border-red-400/30 text-ink/30 hover:text-red-400"
-              >
-                ↺ Fresh Start
-              </button>
-            )}
-            <button
-              onClick={() => setShowTracker(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all bg-ink/6 border border-ink/10 hover:border-ink/25 text-ink/60 hover:text-ink"
-            >
-              📋 {applications.length > 0 && <span className="text-indigo-400 font-bold">{applications.length}</span>} Applications
-            </button>
-          </div>
-        </nav>}
-
-        {/* Main Content */}
-        <main id="main-content" className="px-4 py-10 max-w-5xl mx-auto fade-in">
-          {embedded && <div className="flex flex-wrap justify-end gap-3 mb-6"><button className="button secondary" onClick={() => setShowTracker(true)}>Application activity ({applications.length})</button><button className="text-link" onClick={handleReset}>Upload another CV</button></div>}
-          <StepIndicator current={step} />
-
-          {step === 0 && <UploadStep onNext={handleUpload} />}
-          {step === 1 && uploadData && (
-            <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} />
-          )}
-          {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
-          {step === 1 && !uploadData && <UploadStep onNext={handleUpload} />}
-          {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
-          {step === 3 && profile && (
-            <JobsStep
-              applications={applications}
-              profile={profile}
-              onApply={(job, method) => handleApply(job, method)}
-            />
-          )}
-          {/* If step=2 or 3 but profile lost somehow, go back to upload */}
-          {(step === 2 || step === 3) && !profile && <UploadStep onNext={handleUpload} />}
-        </main>
-
-        {/* Footer */}
-        {!embedded && <footer className="text-center py-8 text-ink/15 text-xs border-t border-ink/5 mt-8">
-          JobAI by Philos Digital Labs · Powered by Groq AI (Free) · Searches LinkedIn, Indeed, Glassdoor, RemoteOK, Wellfound & more
-        </footer>}
-
-        {showTracker && <TrackerPanel applications={applications} onClose={closeTracker} onStatusChange={handleStatusChange} onDelete={handleDelete} />}
-        <ToastContainer />
-      </div>
+      {showTracker && <TrackerPanel applications={applications} onClose={closeTracker} onStatusChange={handleStatusChange} onDelete={handleDelete} />}
+      <ToastContainer />
     </>
   );
 }

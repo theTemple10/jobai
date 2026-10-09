@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import LandingPage from './components/LandingPage.jsx';
 import ResumeBuilder from './components/ResumeBuilder.jsx';
 import AccountPanel from './components/AccountPanel.jsx';
-import JobSearch from './index.jsx';
+import JobSearch from './JobSearch.jsx';
 import { emptyResume, normalizeResume, resumeFromProfile, profileFromResume } from './lib/resume.js';
 import { supabase } from './lib/supabase.js';
 import './product.css';
@@ -72,7 +72,7 @@ export default function ProductApp() {
     {route === 'home' && <LandingPage navigate={navigate} />}
     {route === 'builder' && <ResumeBuilder resume={resume} onChange={setResume} user={user} cloudId={cloudId} onCloudSaved={setCloudId} onImport={() => {setImporting(true); navigate('jobs');}} onFindJobs={findJobs} navigate={navigate} />}
     {route === 'account' && <AccountPanel user={user} onOpenResume={openResume} navigate={navigate} />}
-    {route === 'jobs' && <JobSearch embedded forceUpload={importing} onProfileParsed={importing ? profile => {setResume(resumeFromProfile(profile)); setCloudId(null); setImporting(false); navigate('builder');} : undefined} />}
+    {route === 'jobs' && <JobSearch forceUpload={importing} onProfileParsed={importing ? profile => {setResume(resumeFromProfile(profile)); setCloudId(null); setImporting(false); navigate('builder');} : undefined} />}
     <footer className="product-footer"><div className="container"><a className="footer-brand" href="#/">JobAI<span> A little structure for your next chapter.</span></a><p>Built by Philos Digital Labs. You review your documents and submit applications yourself.</p><p>CVs are sent to our AI provider when you choose analysis. Account saving is optional.</p></div></footer>
   </div>;
 }

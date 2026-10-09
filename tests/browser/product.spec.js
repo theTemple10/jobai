@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { unzipSync, strFromU8 } from 'fflate';
+import { buildRequest } from '../../api/groq.js';
 
 test('landing and builder fit mobile widths and respect reduced motion', async ({ page }) => {
   for (const width of [320,375,768,1440]) {
@@ -22,7 +23,9 @@ test('existing Word CV imports into editable builder fields',async({page})=>{
   const {Document,Packer,Paragraph}=await import('docx');
   const buffer=await Packer.toBuffer(new Document({sections:[{children:[new Paragraph('Ada Obi, Frontend Developer. Built accessible community tools using JavaScript. Education: BSc Computer Science.')]}]}));
   await page.route('**/api/groq',async route=>{
-    expect(route.request().postDataJSON().operation).toBe('parse');
+    const payload = route.request().postDataJSON();
+    expect(payload.operation).toBe('parse');
+    expect(buildRequest(payload).messages[1].content).toContain('Ada Obi');
     await route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Obi',title:'Frontend Developer',skills:['JavaScript'],experience:[],education:[]})}}]})});
   });
   await page.goto('/#/builder');await page.getByRole('button',{name:'Import an existing CV'}).click();

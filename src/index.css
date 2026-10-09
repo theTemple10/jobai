@@ -12,13 +12,10 @@
 :root {
   --ink: 11 30 61;                       /* slate-900 -- primary text/border/overlay base */
   --bg-app: #F7F5F0;                     /* page background */
-  --bg-glow: rgba(99, 102, 241, 0.05);   /* subtle hero glow tint */
-  --bg-nav: rgba(247, 245, 240, 0.95);   /* navbar / footer backdrop */
   --bg-panel: #FFFDF8;                   /* drawers / solid panels */
   --bg-card: rgba(255, 255, 255, 0.9);   /* job cards */
   --bg-disabled: #CBD5E1;                /* disabled button fill */
   --border-soft: rgba(15, 23, 42, 0.10);
-  --border-faint: rgba(15, 23, 42, 0.06);
   --scrollbar-thumb: rgba(15, 23, 42, 0.16);
   --select-bg: #FFFDF8;
   --select-fg: #0F172A;
@@ -29,13 +26,10 @@
 .dark {
   --ink: 255 255 255;                    /* white -- primary text/border/overlay base */
   --bg-app: #0B0F19;
-  --bg-glow: rgba(99, 102, 241, 0.06);
-  --bg-nav: rgba(8, 10, 15, 0.85);
   --bg-panel: #151C2C;
   --bg-card: rgba(22, 27, 39, 0.8);
   --bg-disabled: #4B5563;
   --border-soft: rgba(255, 255, 255, 0.08);
-  --border-faint: rgba(255, 255, 255, 0.05);
   --scrollbar-thumb: rgba(255, 255, 255, 0.1);
   --select-bg: #161B27;
   --select-fg: #FFFDF8;
@@ -51,3 +45,14 @@ body {
 }
 
 .dark body { color-scheme: dark; }
+
+
+/* Job workflow animations and native controls share the global theme. */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+@keyframes slideInToast { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes cvBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadeIn 0.4s ease forwards; }
+select option { background: var(--select-bg); color: var(--select-fg); }
