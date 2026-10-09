@@ -1,184 +1,78 @@
-# JobAI — AI-Powered Job Application Platform
+# JobAI
 
-> Upload your CV → AI parses it → Get matched jobs → Apply in one click.
+A guided CV builder and job-application preparation workspace by Philos Digital Labs.
 
-Built by **Philos Digital Labs**.
+Start with your own facts, import an existing CV, or choose sections and write a few pointers. Review the result, download a readable document, and prepare your next application.
 
-Live demo: **[jobai-orpin.vercel.app](https://jobai-orpin.vercel.app)**
+## Implemented
 
----
+- Navy, ivory, and gold landing page with light/dark themes, original daily encouragements, and a paper companion that respects reduced-motion preferences.
+- Optional CV sections, editable facts, live preview, and reviewed PDF, Word, and plain-text exports.
+- PDF/DOCX text extraction and optional image analysis when a vision-capable provider model is configured.
+- Optional AI wording suggestions based on supplied facts, never a guarantee of correctness.
+- Job search with deterministic listed-skill coverage, full posting context, truthful missing dates/salary, and explicit provider failures.
+- Editable cover letters and external application-page assistance. The user submits on the employer's site.
+- Device-local application activity with user-confirmed submission status; explicit device CV saving and deletion.
+- Supabase email-link authentication and account CV insert/read/update/delete integration. These require the migration and environment configuration below; they are not automatically activated by cloning the repo.
+- Supabase-backed atomic provider quotas, server-selected models/token limits, input validation, and timeouts.
 
-## Features
+ATS-friendly describes simple formatting and selectable text. JobAI does not promise a universal ATS score, employer acceptance, geographic eligibility, automated submission, or hiring probability. See [CV research and acceptance criteria](docs/ATS_RESEARCH.md).
 
-- **CV Parsing** — Upload a PDF, Word (.docx), or image; AI extracts your skills, experience, and role
-- **Job Matching** — 12+ real, ranked job listings pulled from JSearch (RapidAPI)
-- **AI Cover Letters** — One-click generation tailored to each job posting
-- **Apply Flow** — Opens the job page and copies your cover letter to clipboard
-- **Light / Dark Mode** — Follows your OS/browser preference, or set manually
-- **Remote / Freelance Mode** — Toggle for eligible professions
-- **Application Tracker** — Track applied jobs with live toast notifications
-- **Email Notifications** — Get a copy of your cover letter via EmailJS
+## Local development
 
----
-
-## Tech Stack
-
-| Layer | Tool |
-|---|---|
-| Frontend | React 18 + Vite, Tailwind CSS v3 |
-| AI (text) | Groq API — `llama-3.3-70b-versatile` |
-| AI (vision / CV parsing) | Groq API — `llama-4-scout` |
-| Job listings | JSearch via RapidAPI |
-| Email | EmailJS |
-| PDF parsing | PDF.js (CDN, dynamically loaded) |
-| Backend proxy | Vercel serverless functions (`/api/`) |
-| Deployment | Vercel |
-
----
-
-## Architecture: Secure Backend Proxy
-
-API keys are **never exposed in the browser bundle**. All external API calls go through Vercel serverless functions:
-
-```
-Browser → /api/groq.js   → Groq API     (AI text + vision)
-Browser → /api/jobs.js   → JSearch API  (job listings)
-```
-
-The `api/` folder lives at the project root and is automatically deployed as serverless functions by Vercel.
-
----
-
-## Quick Start (Local)
-
-**Prerequisites:** Node.js 18+, Groq API key (console.groq.com — free, no card required), JSearch key (rapidapi.com)
+Use **Node 22.12+ within the Node 22 series** (`.nvmrc` is included).
 
 ```bash
-npm install
-```
-
-Create `.env.local`:
-```
-GROQ_API_KEY=your-groq-key-here
-JSEARCH_KEY=your-jsearch-key-here
-EMAILJS_SERVICE_ID=your-service-id
-EMAILJS_TEMPLATE_ID=your-template-id
-EMAILJS_PUBLIC_KEY=your-public-key
-```
-
-> ⚠️ Note: `GROQ_API_KEY` and `JSEARCH_KEY` have **no** `VITE_` prefix — they are server-side only and never sent to the browser.
-
-```bash
+npm ci
+cp .env.example .env.local
 npm run dev
-# Open http://localhost:5173
 ```
 
----
+Vite serves the UI at `http://localhost:5173`. It does not execute Vercel serverless functions. Use authenticated `vercel dev` for live local API testing; the manual CV builder and exports work with Vite alone.
 
-## Deploy to Vercel
+Supabase project: `https://qxhkrepvoqnsxcofarno.supabase.co`.
 
-### 1. Push to GitHub
+Apply `supabase/migrations/202610090001_workspace.sql` once. Add the project's publishable key to `VITE_SUPABASE_PUBLISHABLE_KEY` and server `SUPABASE_PUBLISHABLE_KEY`, and its URL to the matching URL variables. Configure Supabase Auth's Site URL and allowed redirect origins. Never put a service-role key, database password, or AI provider secret in a `VITE_` variable.
+
+`GROQ_API_KEY` and `JSEARCH_KEY` are server-only. The server selects `GROQ_TEXT_MODEL`, defaulting to `openai/gpt-oss-120b`. Image analysis is unavailable until a verified `GROQ_VISION_MODEL` is set. Production provider endpoints require authenticated access and the quota RPC; they fail closed if setup is incomplete. Guest CV creation/download remains available.
+
+EmailJS is optional, uses the three `VITE_EMAILJS_*` public values in `.env.example`, and sends only when the user opts in. Delivery failures are reported independently of application activity.
+
+## Checks
 
 ```bash
-git add .
-git commit -m "your message"
-git push origin main
+npm run lint
+npm test
+npm run build
+npm run test:browser
 ```
 
-### 2. Import on Vercel
+Browser checks use locally installed Chrome. In CI, Playwright uses Chromium. Install it with `npx playwright install --with-deps chromium` and set `CI=true` when using that browser locally. PDF text checks require `pdftotext` (Poppler). CI installs it.
 
-1. Go to [vercel.com](https://vercel.com) → Sign in with GitHub
-2. Click **Add New Project** → select your `jobai` repo → **Import**
+Regression tests cover document section exclusion, profile validation, deterministic job data, provider constraints, daily encouragement, and PostgreSQL ownership/quota behavior using a local PGlite database. Browser tests cover small-screen layouts, real exports with accented names, Word import, draft recovery, confirmed application activity, and service failures. Mocked browser provider checks do not prove live AI quality or email delivery.
 
-### 3. Set Environment Variables
+## Architecture
 
-Before clicking Deploy, scroll to **Environment Variables** and add:
-
-| Name | Value | Notes |
-|---|---|---|
-| `GROQ_API_KEY` | `your-groq-key` | No `VITE_` prefix — server-side |
-| `JSEARCH_KEY` | `your-jsearch-key` | No `VITE_` prefix — server-side |
-| `EMAILJS_SERVICE_ID` | `your-service-id` | Client-safe, add `VITE_` if accessing in frontend |
-| `EMAILJS_TEMPLATE_ID` | `your-template-id` | Same as above |
-| `EMAILJS_PUBLIC_KEY` | `your-public-key` | Same as above |
-
-Apply each to: **Production + Preview + Development**.
-
-### 4. Deploy
-
-Click **Deploy**. Live in ~30 seconds. Every future `git push` auto-redeploys.
-
----
-
-## Getting Your API Keys
-
-### Groq (AI — Free, No Card Required)
-1. Visit [console.groq.com](https://console.groq.com)
-2. Sign up → API Keys → Create Key
-3. Works globally ✓
-
-### JSearch (Job Listings)
-1. Visit [rapidapi.com/letscrape-6bfat3ri3r](https://rapidapi.com/letscrape-6bfat3ri3r/api/jsearch)
-2. Subscribe to the free tier
-3. Copy your RapidAPI key
-
-### EmailJS (Email Notifications)
-1. Visit [emailjs.com](https://emailjs.com)
-2. Create a service and email template
-3. Copy your Service ID, Template ID, and Public Key
-
----
-
-## Cost
-
-| Service | Cost |
-|---|---|
-| Groq API | **Free** (generous rate limits, no card details needed) |
-| JSearch | **Free** tier available (10 req/month on basic) |
-| EmailJS | **Free** tier (200 emails/month) |
-| Vercel | **Free** (Hobby plan) |
-
-Running this app costs **$0** on the free tiers.
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---|---|
-| Jobs not loading | Verify `JSEARCH_KEY` is set in Vercel without `VITE_` prefix |
-| AI not responding | Check `GROQ_API_KEY` is set correctly (server-side) |
-| Blank page after deploy | Check browser console for errors |
-| CV not parsing | File must be under 10MB, PDF or image format |
-| Email not sending | Confirm all three EmailJS variables are set |
-| `api/` routes returning 404 locally | Use `vercel dev` instead of `npm run dev` for local proxy testing |
-
----
-
-## Customisation
-
-- **Add job boards** — edit the `JOB_BOARDS` array in `App.jsx`
-- **Swap AI model** — edit the `MODEL` constant in `App.jsx` (see [Groq model list](https://console.groq.com/docs/models))
-- **Persist data** — replace `useState` with `localStorage` or a database
-- **Add user accounts** — wrap `App` with Clerk or Supabase Auth
-
----
-
-## Project Structure
-
-```
-jobai/
-├── api/
-│   ├── groq.js          # Serverless proxy → Groq API
-│   └── jobs.js          # Serverless proxy → JSearch API
-├── src/
-│   └── App.jsx          # Main React app
-├── public/
-├── .env.local           # Local secrets (never committed)
-├── vercel.json          # Vercel config (if needed)
-└── package.json
+```text
+src/ProductApp.jsx        Landing, builder, workspace navigation and sign-in state
+src/components/          LandingPage, ResumeBuilder, AccountPanel
+src/lib/resume.js         Shared factual document model and completeness guidance
+src/lib/exportResume.js   PDF, Word, and plain-text exports
+src/lib/parseDocument.js  PDF and DOCX text extraction
+src/lib/jobs.js           Deterministic job normalization and profile validation
+src/lib/supabase.js       Public client and account CV queries (RLS protected)
+src/index.jsx            Existing job discovery, cover letters, local activity
+api/                     Vercel provider endpoints
+server/protection.js     Verified account identity and shared hourly quotas
+supabase/migrations/     CV ownership policies and atomic usage counters
 ```
 
----
+Exports use open-licensed Noto Sans for PDF and standard Word paragraphs. Font licensing is included under `public/fonts/OFL.txt`. Document parsers and export tools load separately from the initial landing-page bundle.
 
-MIT License
+## Delivery and current limits
+
+Vercel target: `thetemple10s-projects/jobai`. Use feature-branch previews and review before changing production. See [delivery/configuration plan](docs/DELIVERY_PLAN.md).
+
+Account saving needs deployed Supabase configuration and live verification. Application activity and cover-letter drafts currently remain on the device. CV editing is manual with optional summary wording assistance; comprehensive job-specific CV tailoring is a future batch. PDF font coverage and export pagination should be checked for each supported language and unusually long document. Scanned PDFs need image conversion or manual entry.
+
+Operating cost depends on provider plans, traffic, token usage, and hosting terms; no permanent $0 operating claim is made. The baseline assessment in [CODEBASE_REVIEW.md](CODEBASE_REVIEW.md) records the pre-change findings, not the current implementation state.

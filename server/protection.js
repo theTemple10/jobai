@@ -18,11 +18,11 @@ export async function authorize(req) {
   if (!user.id) throw new HttpError(401, 'Please sign in again.');
   return user.id;
 }
-export async function rateLimit(identity, operation, limit) {
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+export async function rateLimit(identity, operation, limit, authorization) {
+  const url = process.env.SUPABASE_URL;
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
   const key = `jobai:${operation}:${createHash('sha256').update(identity).digest('hex')}`;
-  if (!redisUrl || !redisToken) {
+  if (!url || !publishableKey) {
     if (process.env.NODE_ENV === 'production') throw new HttpError(503, 'The service is temporarily unavailable. Your draft is safe; please try again later.');
     const now = Date.now();
     if (counters.size > 1000) for (const [id, row] of counters) if (row.until < now) counters.delete(id);
@@ -32,14 +32,14 @@ export async function rateLimit(identity, operation, limit) {
     if (row.count > limit) throw new HttpError(429, 'You have reached the hourly limit. Please try again later.');
     return;
   }
-  const response = await fetch(redisUrl, {
-    method: 'POST', headers: {Authorization: `Bearer ${redisToken}`, 'Content-Type': 'application/json'},
-    body: JSON.stringify(['EVAL', "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],3600) end; return n", '1', key]),
-    signal: AbortSignal.timeout(10000),
+  if (!authorization) throw new HttpError(401, 'Please sign in to use this service.');
+  const response = await fetch(`${url}/rest/v1/rpc/consume_service_quota`, {
+    method: 'POST', headers: {apikey: publishableKey, Authorization: authorization, 'Content-Type': 'application/json'},
+    body: JSON.stringify({requested_operation: operation}), signal: AbortSignal.timeout(10000),
   });
   const result = await response.json();
-  if (!response.ok || result.error || !Number.isFinite(Number(result.result))) throw new HttpError(503, 'We could not check service availability. Please try again.');
-  if (Number(result.result) > limit) throw new HttpError(429, 'You have reached the hourly limit. Please try again later.');
+  if (!response.ok || typeof result !== 'boolean') throw new HttpError(503, 'We could not check service availability. Please try again.');
+  if (!result) throw new HttpError(429, 'You have reached the hourly limit. Please try again later.');
 }
 export function replyError(res, error) {
   const status = error.status || (error.name === 'TimeoutError' ? 504 : 502);

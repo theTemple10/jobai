@@ -16,7 +16,7 @@ test('search forwards only allowed parameters and limits pagination', () => {
   assert.throws(()=>buildSearch({query:['bad']}));
 });
 test('production provider endpoints fail closed without account/quota configuration', async () => {
-  const keys=['NODE_ENV','SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','UPSTASH_REDIS_REST_URL','UPSTASH_REDIS_REST_TOKEN'];
+  const keys=['NODE_ENV','SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY'];
   const previous=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
   try {
     process.env.NODE_ENV='production';for(const key of keys.slice(1)) delete process.env[key];
