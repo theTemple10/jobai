@@ -161,7 +161,7 @@ function StepIndicator({ current }) {
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500 ${
                 i < current
-                  ? "bg-indigo-500 text-black"
+                  ? "bg-indigo-500 text-white"
                   : i === current
                   ? "bg-indigo-400/20 border-2 border-indigo-400 text-indigo-400"
                   : "bg-ink/5 border border-ink/10 text-ink/30"
@@ -211,7 +211,7 @@ function UploadStep({ onNext }) {
     }
     if (!validType && !validExt) { showToast("Please upload a PDF, Word (.docx), or image file", "error"); return; }
     if (f.size > 10 * 1024 * 1024) {showToast("Please use a file smaller than 10MB", "error"); return;}
-    if (f.type.startsWith("image/") && f.size > 3 * 1024 * 1024) {showToast("Please use an image smaller than 3MB", "error"); return;}
+    if ((f.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(f.name)) && f.size > 3 * 1024 * 1024) {showToast("Please use an image smaller than 3MB", "error"); return;}
     setFile(f);
     showToast(`${f.name} ready for analysis`, "success");
   };
@@ -286,7 +286,7 @@ function UploadStep({ onNext }) {
       <button
         disabled={!file || !consent}
         onClick={() => onNext({ file, prompt })}
-        className="w-full py-4 rounded-xl font-bold text-black text-base transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
+        className="w-full py-4 rounded-xl font-bold text-white text-base transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
         style={{
           background: file ? "linear-gradient(135deg, #6366F1, #4F46E5)" : "var(--bg-disabled)",
           boxShadow: file ? "0 0 30px rgba(99,102,241,0.3)" : "none",
@@ -307,23 +307,6 @@ function ParsingStep({ file, prompt, onDone }) {
     let active = true;
     let resultTimer;
     const controller = new AbortController();
-
-    const stages = [
-      { msg: "Reading your CV…", pct: 15 },
-      { msg: "Extracting experience & skills…", pct: 40 },
-      { msg: "Identifying key competencies…", pct: 65 },
-      { msg: "Matching to job categories…", pct: 85 },
-      { msg: "Finalising profile…", pct: 95 },
-    ];
-
-    let i = 0;
-    const tick = setInterval(() => {
-      if (i < stages.length) {
-        setStatus(stages[i].msg);
-        setProgress(stages[i].pct);
-        i++;
-      }
-    }, 700);
 
     (async () => {
       try {
@@ -403,6 +386,8 @@ Additional context: ${prompt || "None provided"}`,
           ];
         }
 
+        if (!active) return;
+        setStatus("AI is organizing the extracted information…");
         const raw = await callClaude({
           system: "You are an expert CV parser. Return only valid JSON, no markdown fences, no explanation.",
           userContent,
@@ -412,7 +397,6 @@ Additional context: ${prompt || "None provided"}`,
         });
 
         if (!active) return;
-        clearInterval(tick);
         setProgress(100);
         setStatus("Complete!");
 
@@ -427,13 +411,12 @@ Additional context: ${prompt || "None provided"}`,
         resultTimer = setTimeout(() => {if (active) onDone(parsed);}, 600);
       } catch (err) {
         if (!active) return;
-        clearInterval(tick);
         showToast(err.message || "Analysis failed. Please try again.", "error");
         resultTimer = setTimeout(() => {if (active) onDone(null);}, 1000);
       }
     })();
 
-    return () => {active = false; controller.abort(); clearInterval(tick); clearTimeout(resultTimer);};
+    return () => {active = false; controller.abort(); clearTimeout(resultTimer);};
   }, [file, prompt, onDone]);
 
   return (
@@ -450,7 +433,7 @@ Additional context: ${prompt || "None provided"}`,
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center text-indigo-400 font-bold font-mono text-lg">
-          {progress}%
+          {progress === 100 ? "✓" : "✦"}
         </div>
       </div>
       <div className="text-ink font-semibold text-xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>
@@ -499,7 +482,7 @@ function ProfileStep({ profile, onNext }) {
       >
         <div className="flex flex-wrap items-start gap-4">
           <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-black flex-shrink-0"
+            className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white flex-shrink-0"
             style={{ background: "linear-gradient(135deg, #6366F1, #7C3AED)" }}
           >
             {(p.name || "?").charAt(0)}
@@ -599,7 +582,7 @@ function ProfileStep({ profile, onNext }) {
 
       <button
         onClick={() => onNext(p)}
-        className="w-full py-4 rounded-xl font-bold text-black text-base"
+        className="w-full py-4 rounded-xl font-bold text-white text-base"
         style={{
           background: "linear-gradient(135deg, #6366F1, #4F46E5)",
           boxShadow: "0 0 30px rgba(99,102,241,0.3)",
@@ -613,14 +596,14 @@ function ProfileStep({ profile, onNext }) {
 }
 
 // ─── STEP 3: JOBS ─────────────────────────────────────────────────────────────
-function JobsStep({ profile, onApply }) {
+function JobsStep({ profile, onApply, applications }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);     // only the very first load — full-page spinner
   const [searching, setSearching] = useState(false); // subsequent re-searches — keeps old results visible
   const [filter, setFilter] = useState("all");
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [location, setLocation] = useState("all");
-  const [applied, setApplied] = useState({});
+  const applied = Object.fromEntries(applications.filter(app => app.id).map(app => [app.id, app.status || "opened"]));
   const [selected, setSelected] = useState(null);
   const cache = useRef(new Map());
   const abortRef = useRef(null);
@@ -733,7 +716,6 @@ function JobsStep({ profile, onApply }) {
     { value: "Remote", label: "💻 Remote (check eligibility)" },
   ];
 
-  const getBoardColor = (id) => JOB_BOARDS.find((b) => b.id === id)?.color || "#888";
   const getBoardName = (id) => JOB_BOARDS.find((b) => b.id === id)?.name || id;
   // Prefer the job's real publisher name (e.g. "ZipRecruiter") over the
   // generic "Company Site" bucket used only for grouping/filtering.
@@ -741,7 +723,6 @@ function JobsStep({ profile, onApply }) {
 
   const markApplied = (jobId, method) => {
     const job = jobs.find((j) => j.id === jobId);
-    setApplied((prev) => ({ ...prev, [jobId]: method }));
     if (job) onApply(job, method); // ← saves to localStorage tracker
     showToast("Job page opened. Mark it submitted in your tracker after you finish applying.", "info");
   };
@@ -757,7 +738,7 @@ function JobsStep({ profile, onApply }) {
   }
 
   if (selected) {
-    return <JobDetail job={selected} profile={profile} onBack={() => setSelected(null)} onApply={(method) => { markApplied(selected.id, method); setApplied((p) => ({...p, [selected.id]: method})); setSelected(null); }} applied={applied[selected.id]} />;
+    return <JobDetail job={selected} profile={profile} onBack={() => setSelected(null)} onApply={(method) => { markApplied(selected.id, method); setSelected(null); }} applied={applied[selected.id]} />;
   }
 
   return (
@@ -826,8 +807,8 @@ function JobsStep({ profile, onApply }) {
           >
             <div className="flex flex-wrap gap-4 items-start">
               <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center text-xs font-bold text-black flex-shrink-0"
-                style={{ background: `linear-gradient(135deg, ${getBoardColor(job.board)}, ${getBoardColor(job.board)}99)` }}
+                className="w-12 h-12 rounded-xl flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                style={{ background: "#0b1e3d" }}
               >
                 {job.company?.substring(0, 2).toUpperCase()}
               </div>
@@ -835,7 +816,7 @@ function JobsStep({ profile, onApply }) {
                 <div className="flex flex-wrap items-start gap-2 mb-1">
                   <span className="text-ink font-semibold group-hover:text-indigo-300 transition-colors">{job.title}</span>
                   {job.urgent && <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs">🔥 Urgent</span>}
-                  {applied[job.id] && <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs">↗ Opened</span>}
+                  {applied[job.id] && <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs">{applied[job.id] === "submitted" ? "✓ Submitted" : "↗ Opened"}</span>}
                 </div>
                 <div className="text-ink/50 text-sm mb-2">{job.company} · {job.location} · {job.type}</div>
                 <div className="flex flex-wrap gap-2">
@@ -876,6 +857,7 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
   const [coverLetter, setCoverLetter] = useState(() => load(`jobai_letter_${job.id}`, ""));
   const [generating, setGenerating] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailCopy, setEmailCopy] = useState(false);
   // Three-stage apply flow: idle → reviewing → done
   const [applyStage, setApplyStage] = useState("idle");
 
@@ -925,17 +907,17 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
   const oneClickApply = async () => {
     if (!coverLetter) { showToast("Generate and review your cover letter first", "warning"); return; }
 
-    // 1. Copy cover letter to clipboard
+    // Open during the user gesture, before asynchronous clipboard permission.
+    window.open(applyUrl, "_blank", "noopener,noreferrer");
+    // Copy the reviewed letter.
     try { await navigator.clipboard.writeText(coverLetter); } catch {showToast("Clipboard access failed. Copy the letter from the editable text box.", "warning");}
 
-    // 2. Open the real job posting
-    window.open(applyUrl, "_blank", "noopener,noreferrer");
 
     // 3. Mark as applied
     onApply("assisted");
 
     // 4. Send real confirmation email
-    if (profile.email) {
+    if (emailCopy && profile.email) {
       setSendingEmail(true);
       try {
         const delivered = await sendEmail({
@@ -945,9 +927,9 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           company:  job.company,
           board:    boardName,
           date:     new Date().toLocaleDateString(),
-          message:  `You used JobAI's one-click assist to apply for ${job.title} at ${job.company}. Your cover letter was copied to your clipboard and the job page was opened for you to paste and submit.`,
+          message:  `You prepared a letter for ${job.title} at ${job.company}. Submit it on the employer’s site when you are ready.\n\n${coverLetter}`,
         });
-        showToast(`Job page opened. Review the clipboard before pasting. ${delivered ? `Confirmation sent to ${profile.email}` : "Email notifications are not connected"}`, "success");
+        showToast(`Job page opened. Review the clipboard before pasting. ${delivered ? `Letter emailed to ${profile.email}` : "Email notifications are not connected"}`, "success");
       } catch {
         showToast("Job page opened. Review the clipboard before pasting. (Email delivery failed — check EmailJS config)", "warning");
       } finally {
@@ -964,7 +946,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
   const manualApply = async () => {
     window.open(applyUrl, "_blank", "noopener,noreferrer");
     onApply("manual");
-    if (profile.email) {
+    if (emailCopy && profile.email) {
       try {
         await sendEmail({
           toEmail: profile.email,
@@ -993,8 +975,8 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
       >
         <div className="flex flex-wrap gap-4 items-start mb-4">
           <div
-            className="w-14 h-14 rounded-2xl flex items-center justify-center text-sm font-bold text-black"
-            style={{ background: `linear-gradient(135deg, ${board.color}, ${board.color}99)` }}
+            className="w-14 h-14 rounded-2xl flex items-center justify-center text-sm font-bold text-white"
+            style={{ background: "#0b1e3d" }}
           >
             {job.company?.substring(0, 2).toUpperCase()}
           </div>
@@ -1020,7 +1002,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         {/* Apply actions */}
         {applied ? (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
-            ↗ You opened this listing. Submission happens on the employer’s site.
+            {applied === "submitted" ? "✓ You confirmed that you submitted this application." : "↗ You opened this listing. Submission happens on the employer’s site."}
           </div>
         ) : applyStage === "done" ? (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
@@ -1049,14 +1031,14 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
               <button
                 onClick={oneClickApply}
                 disabled={sendingEmail}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-black text-sm font-bold transition-all"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all"
                 style={{ background: "linear-gradient(135deg, #6366F1, #4F46E5)", boxShadow: "0 0 20px rgba(99,102,241,0.3)" }}
               >
-                {sendingEmail ? "Sending email…" : "⚡ One-Click Assist"}
+                {sendingEmail ? "Sending email…" : "Open listing & copy letter"}
               </button>
             </div>
             <p className="text-ink/25 text-xs mt-3">
-              ⚡ One-Click Assist opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
+              Open listing & copy letter opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
             </p>
           </div>
         ) : (
@@ -1078,6 +1060,8 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
           </div>
         )}
       </div>
+
+      {profile.email && <label className="consent"><input type="checkbox" checked={emailCopy} onChange={event => setEmailCopy(event.target.checked)} />Email a copy of my preparation to {profile.email} when I open the listing.</label>}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 bg-ink/3 rounded-xl p-1">
@@ -1144,7 +1128,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                 />
                 <div className="flex gap-3 mt-3">
                   <button
-                    onClick={() => { navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success"); }}
+                    onClick={async () => { try {await navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success");} catch {showToast("Clipboard access failed. Copy the text from the letter above.", "warning");} }}
                     className="px-4 py-2 rounded-xl bg-ink/8 text-ink/60 text-sm hover:bg-ink/12 transition-all"
                   >
                     📋 Copy
@@ -1160,10 +1144,10 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                     <button
                       onClick={oneClickApply}
                       disabled={sendingEmail}
-                      className="ml-auto px-4 py-2 rounded-xl text-black text-sm font-bold"
+                      className="ml-auto px-4 py-2 rounded-xl text-white text-sm font-bold"
                       style={{ background: "linear-gradient(135deg, #6366F1, #4F46E5)" }}
                     >
-                      {sendingEmail ? "Sending…" : "⚡ Apply Now"}
+                      {sendingEmail ? "Sending…" : "Open listing & copy letter"}
                     </button>
                   )}
                 </div>
@@ -1258,10 +1242,11 @@ const load = (key, fallback) => { try { const v = localStorage.getItem(key); ret
 // Theme: "light" | "dark" | "system". Persists to localStorage and, in
 // "system" mode, stays in sync with the OS/browser preference live —
 // no reload needed if the person flips their system theme mid-session.
-function useTheme() {
+function useTheme(enabled = true) {
   const [theme, setTheme] = useState(() => load("jobai_theme", "system"));
 
   useEffect(() => {
+    if (!enabled) return;
     const root = document.documentElement;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
@@ -1276,19 +1261,19 @@ function useTheme() {
       media.addEventListener("change", apply);
       return () => media.removeEventListener("change", apply);
     }
-  }, [theme]);
+  }, [theme, enabled]);
 
   return [theme, setTheme];
 }
 
 export default function App({ embedded = false, forceUpload = false, onProfileParsed }) {
-  const [theme, setTheme] = useTheme();
+  const [theme, setTheme] = useTheme(!embedded);
   const [step, setStep] = useState(() => forceUpload ? 0 : load("jobai_step", 0));
   const [uploadData, setUploadData] = useState(null);
   const [profile, setProfile] = useState(() => load("jobai_profile", null));
   const [applications, setApplications] = useState(() => load("jobai_applications", []));
   const [showTracker, setShowTracker] = useState(false);
-  const useCallbackClose = useCallback(() => setShowTracker(false), []);
+  const closeTracker = useCallback(() => setShowTracker(false), []);
 
   const handleUpload = (data) => {
     setUploadData(data);
@@ -1326,7 +1311,7 @@ export default function App({ embedded = false, forceUpload = false, onProfilePa
       applyUrl: job.applyUrl || "",
     };
     setApplications((prev) => {
-      const updated = [app, ...prev];
+      const updated = [app, ...prev.filter(previous => previous.id !== app.id)];
       save("jobai_applications", updated);
 
       return updated;
@@ -1375,7 +1360,7 @@ export default function App({ embedded = false, forceUpload = false, onProfilePa
         >
           <div className="flex items-center gap-3">
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-black"
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
               style={{ background: "linear-gradient(135deg, #6366F1, #7C3AED)" }}
             >
               J
@@ -1431,6 +1416,7 @@ export default function App({ embedded = false, forceUpload = false, onProfilePa
           {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
           {step === 3 && profile && (
             <JobsStep
+              applications={applications}
               profile={profile}
               onApply={(job, method) => handleApply(job, method)}
             />
@@ -1444,7 +1430,7 @@ export default function App({ embedded = false, forceUpload = false, onProfilePa
           JobAI by Philos Digital Labs · Powered by Groq AI (Free) · Searches LinkedIn, Indeed, Glassdoor, RemoteOK, Wellfound & more
         </footer>}
 
-        {showTracker && <TrackerPanel applications={applications} onClose={useCallbackClose} onStatusChange={handleStatusChange} onDelete={handleDelete} />}
+        {showTracker && <TrackerPanel applications={applications} onClose={closeTracker} onStatusChange={handleStatusChange} onDelete={handleDelete} />}
         <ToastContainer />
       </div>
     </>

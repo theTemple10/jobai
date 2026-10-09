@@ -16,7 +16,21 @@ export async function extractPdfText(file) {
 }
 
 export async function extractDocxText(file) {
-  const mammoth = await import('mammoth/mammoth.browser');
-  const result = await mammoth.extractRawText({arrayBuffer: await file.arrayBuffer()});
-  return (result.value || '').trim();
+  const { unzipSync, strFromU8 } = await import('fflate');
+  let total = 0;
+  const documents = unzipSync(new Uint8Array(await file.arrayBuffer()), {
+    filter(entry) {
+      total += entry.originalSize;
+      if (entry.originalSize > 5 * 1024 * 1024 || total > 20 * 1024 * 1024) throw new Error('This Word document is too complex. Please export a simpler PDF.');
+      return /^word\/(document|header\d+|footer\d+)\.xml$/.test(entry.name);
+    },
+  });
+  if (!documents['word/document.xml']) throw new Error('This file is not a supported Word document.');
+  return Object.entries(documents).map(([, bytes]) => {
+    const xml = new DOMParser().parseFromString(strFromU8(bytes), 'application/xml');
+    if (xml.querySelector('parsererror')) throw new Error('This Word document could not be read. Please try a PDF.');
+    return Array.from(xml.getElementsByTagNameNS('*', 'p')).map(paragraph =>
+      Array.from(paragraph.getElementsByTagNameNS('*', 't')).map(run => run.textContent).join('')
+    ).join('\n');
+  }).join('\n').trim();
 }
