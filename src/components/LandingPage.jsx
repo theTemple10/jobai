@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { BRAND } from '../lib/brand.js';
 import { dailyEncouragement } from '../lib/quotes.js';
 
 function PaperCompanion() {
@@ -7,7 +8,7 @@ function PaperCompanion() {
     <span className="art-spark spark-one">✧</span><span className="art-spark spark-two">✦</span>
     <div className="paper-pal">
       <div className="paper-fold" /><div className="pal-eyes"><i /><i /></div><div className="pal-smile" />
-      <div className="pal-lines"><i /><i /><i /></div><div className="pal-seal">✓</div>
+      <div className="pal-lines"><i /><i /><i /></div><div className="pal-seal"><img src="/brand-mark.svg" width="28" height="28" alt="" /></div>
     </div>
     <div className="art-note note-one"><span className="note-dot" /> Your story, clearly told</div>
     <div className="art-note note-two">One step at a time <span>↗</span></div>
@@ -15,7 +16,7 @@ function PaperCompanion() {
   </div>;
 }
 
-export default function LandingPage({ navigate }) {
+export default function LandingPage({ navigate, onImport }) {
   const [quote, setQuote] = useState(() => dailyEncouragement());
   useEffect(() => {
     const timer = setInterval(() => setQuote(dailyEncouragement()), 60000);
@@ -28,15 +29,15 @@ export default function LandingPage({ navigate }) {
         <span className="eyebrow"><span /> YOUR NEXT CHAPTER STARTS HERE</span>
         <h1>You have a story.<br />Let’s help it<br /><em>open doors.</em></h1>
         <p className="hero-intro">The job search can feel like a lot. Your CV doesn’t have to.</p>
-        <p>Whether you’re writing your first resume or finding a better way to tell your experience, JobAI gives you a place to begin. Put your ideas into words, discover roles to explore, and prepare an application you can stand behind.</p>
-        <div className="hero-actions"><button className="button primary" onClick={() => navigate('builder')}>Build my CV <span>↗</span></button><button className="button secondary" onClick={() => navigate('jobs')}>I already have a CV <span>→</span></button></div>
+        <p>Whether you’re writing your first resume or finding a better way to tell your experience, {BRAND.name} gives you a place to begin. Put your ideas into words, discover roles to explore, and prepare an application you can stand behind.</p>
+        <div className="hero-actions"><button className="button primary" onClick={() => navigate('builder')}>Build my CV <span>↗</span></button><button className="button secondary" onClick={onImport}>I already have a CV <span>→</span></button></div>
         <p className="hero-footnote">Start without an account · Your words stay editable · Go at your own pace</p>
       </div>
       <PaperCompanion />
     </section>
 
     <aside className="daily-note container" aria-label="Daily encouragement">
-      <span className="daily-icon" aria-hidden="true">☀</span><div><span className="eyebrow">A SMALL REMINDER FOR TODAY</span><blockquote>“{quote}”</blockquote><p>Words from JobAI · A new reminder each day</p></div>
+      <span className="daily-icon" aria-hidden="true">☀</span><div><span className="eyebrow">A SMALL REMINDER FOR TODAY</span><blockquote>“{quote}”</blockquote><p>Words from {BRAND.name} · A new reminder each day</p></div>
     </aside>
 
     <section id="how-it-works" className="landing-section container">

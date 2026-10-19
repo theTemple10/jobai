@@ -1,3 +1,4 @@
+import { BRAND } from './brand.js';
 import { resumeBlocks } from './resume.js';
 
 function download(blob, filename) {
@@ -32,7 +33,7 @@ export async function exportDocx(resume) {
     keepNext: ['heading', 'entry'].includes(block.type),
   }));
   const doc = new Document({
-    creator: 'JobAI', title: `${resume.name || 'My'} CV`,
+    creator: BRAND.name, title: `${resume.name || 'My'} CV`,
     sections: [{properties: {page: {margin: {top: 850, right: 850, bottom: 850, left: 850}}}, children: paragraphs}],
   });
   download(await Packer.toBlob(doc), `${filename(resume)}.docx`);

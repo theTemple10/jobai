@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { normalizeJob, normalizeProfile } from "./lib/jobs.js";
-import { requestAI, authHeaders } from "./lib/ai.js";
+import { normalizeProfile } from "./lib/jobs.js";
+import { requestAI } from "./lib/ai.js";
+import JobExplorer from "./components/JobExplorer.jsx";
+import { readStored, readActivity, readJobProfile } from "./lib/storage.js";
 import { extractPdfText, extractDocxText } from "./lib/parseDocument.js";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
@@ -11,7 +13,7 @@ const EJS_TEMPLATE = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "";
 const EJS_KEY      = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  || "";
 
 // Proxy endpoints (Vercel serverless functions in /api/)
-const PROXY_JOBS = "/api/jobs";
+const EMPTY_PROFILE = {title: "", skills: [], name: ""};
 
 const JOB_BOARDS = [
   { id: "linkedin", name: "LinkedIn", icon: "in", color: "#0077B5", url: "https://www.linkedin.com/jobs/search/?keywords=" },
@@ -26,20 +28,14 @@ const JOB_BOARDS = [
   { id: "other", name: "Company Site", icon: "co", color: "#6366F1", url: "https://www.google.com/search?q=" },
 ];
 
-const REMOTE_PROFESSIONS = [
-  "software", "developer", "engineer", "programmer", "designer", "writer",
-  "marketing", "analyst", "data", "product", "manager", "consultant",
-  "accountant", "finance", "hr", "recruiter", "content", "seo", "ux", "ui",
-  "devops", "cloud", "security", "backend", "frontend", "fullstack", "mobile",
-  "qa", "tester", "architect", "scientist", "researcher", "teacher", "tutor",
-  "translator", "editor", "photographer", "video", "copywriter", "support",
-];
-
 const CV_PARSE_PROMPT = `Parse this CV/resume and return ONLY valid JSON (no markdown, no backticks):
 {
   "name": "Full Name",
   "email": "email or null",
   "phone": "phone or null",
+  "website": "portfolio or LinkedIn URL, or empty string",
+  "projects": [{"name": "Project name", "link": "URL or empty string", "highlights": ["factual contribution"]}],
+  "volunteering": [{"role": "Role", "company": "Organisation", "duration": "Dates", "highlights": ["factual contribution"]}],
   "location": "City, Country or null",
   "title": "Current/Target Job Title",
   "summary": "2-sentence professional summary",
@@ -50,7 +46,6 @@ const CV_PARSE_PROMPT = `Parse this CV/resume and return ONLY valid JSON (no mar
   "certifications": [],
   "jobTitles": ["5 relevant job titles to search for"],
   "seniority": "Junior|Mid|Senior|Lead|Director",
-  "isRemoteEligible": true,
   "industries": ["relevant industries"],
   "keyStrengths": ["strength1", "strength2", "strength3"],
   "salaryExpectation": null
@@ -68,12 +63,6 @@ const fileToBase64 = (file) =>
     r.onerror = () => rej(new Error("Read failed"));
     r.readAsDataURL(file);
   });
-
-const isRemoteEligible = (title = "", skills = []) => {
-  const combined = (title + " " + skills.join(" ")).toLowerCase();
-  return REMOTE_PROFESSIONS.some((p) => combined.includes(p));
-};
-
 
 // ─── TOAST SYSTEM ────────────────────────────────────────────────────────────
 let toastId = 0;
@@ -105,7 +94,7 @@ function ToastContainer() {
   };
 
   return (
-    <div role="status" aria-live="polite" className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" style={{ maxWidth: 360 }}>
+    <div role="status" aria-live="polite" className="toast-container fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" style={{ maxWidth: 360 }}>
       {toasts.map((t) => (
         <div
           key={t.id}
@@ -227,7 +216,7 @@ function UploadStep({ onNext }) {
           Start Your Job Search
         </h2>
         <p className="text-ink/50 text-sm leading-relaxed max-w-md mx-auto">
-          Upload your CV and our AI will extract your skills, experience, and suggest the best-matched jobs across top boards.
+          Bring in your skills and experience, review what was extracted, then explore roles with a clearer starting point.
         </p>
       </div>
 
@@ -264,7 +253,7 @@ function UploadStep({ onNext }) {
 
       {/* Optional Prompt */}
       <div className="mb-6">
-        <label className="block text-ink/60 text-xs font-mono mb-2 uppercase tracking-widest">
+        <label className="block text-ink/80 text-xs font-mono mb-2 uppercase tracking-widest">
           Additional Context (Optional)
         </label>
         <textarea
@@ -410,17 +399,17 @@ const Tag = ({ label, onRemove }) => (
 
 function ProfileStep({ profile, onNext }) {
   const [p, setP] = useState(profile);
-  const remote = isRemoteEligible(p.title, p.skills);
+
 
 
   return (
     <div className="max-w-3xl mx-auto">
       <div className="text-center mb-8">
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-400/10 border border-indigo-400/20 text-indigo-400 text-xs font-mono mb-3">
-          STEP 03 / YOUR PROFILE
+          YOUR STARTING POINT
         </div>
         <h2 className="text-3xl font-bold text-ink" style={{ fontFamily: "'Playfair Display', serif" }}>
-          AI-Extracted Profile
+          A profile to build on.
         </h2>
         <p className="text-ink/40 text-sm mt-2">Review and edit before we find your matches</p>
       </div>
@@ -455,15 +444,10 @@ function ProfileStep({ profile, onNext }) {
               {p.email && <span>✉ {p.email}</span>}
               {p.location && <span>📍 {p.location}</span>}
               {p.seniority && <span className="px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-300">{p.seniority}</span>}
-              {remote && <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300">🌍 Remote Eligible</span>}
+
             </div>
           </div>
-          {p.salaryExpectation && (
-            <div className="text-right">
-              <div className="text-ink/30 text-xs">Est. Salary Range</div>
-              <div className="text-indigo-400 font-mono font-bold">{p.salaryExpectation}</div>
-            </div>
-          )}
+
         </div>
         {p.summary && (
           <div className="mt-4 pt-4 border-t border-ink/8">
@@ -539,274 +523,22 @@ function ProfileStep({ profile, onNext }) {
           fontFamily: "'Outfit', sans-serif",
         }}
       >
-        Find My Job Matches →
+        Explore jobs for this profile →
       </button>
     </div>
   );
 }
 
 // ─── STEP 3: JOBS ─────────────────────────────────────────────────────────────
-function JobsStep({ profile, onApply, applications }) {
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(true);     // only the very first load — full-page spinner
-  const [searching, setSearching] = useState(false); // subsequent re-searches — keeps old results visible
-  const [filter, setFilter] = useState("all");
-  const [remoteOnly, setRemoteOnly] = useState(false);
-  const [location, setLocation] = useState("all");
-  const applied = Object.fromEntries(applications.filter(app => app.id).map(app => [app.id, app.status || "opened"]));
-  const [selected, setSelected] = useState(null);
-  const cache = useRef(new Map());
-  const abortRef = useRef(null);
-  const [searchError, setSearchError] = useState("");
-
-  const generateJobs = useCallback(async (loc) => {
-    abortRef.current?.abort();
-    setSearchError("");
-    // Instant path: we've already fetched this exact location this session
-    if (cache.current.has(loc)) {
-      setJobs(cache.current.get(loc));
-      setLoading(false);
-      setSearching(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    // Build search queries from profile job titles
-    const queries = (profile.jobTitles?.length ? profile.jobTitles : [profile.title]).filter(Boolean).slice(0, 3);
-    const isRemoteLocation = loc === "Remote";
-    // "Remote" isn't a real place — asking JSearch to geocode "in Remote"
-    // returns poor/empty results. Use its dedicated remote filter instead.
-    const locationQuery = loc !== "all" && !isRemoteLocation ? ` in ${loc}` : "";
-    const remoteParam = isRemoteLocation ? "&remote_jobs_only=true" : "";
-
-    const remoteEligible = isRemoteEligible(profile.title, profile.skills);
-    if (remoteEligible && !isRemoteLocation) queries.push(`${profile.title} remote`);
-
-    try {
-      const headers = await authHeaders();
-      // Fetch results for each query in parallel via our secure proxy
-      const results = await Promise.allSettled(
-        queries.map((q) =>
-          fetch(`${PROXY_JOBS}?query=${encodeURIComponent(q + locationQuery)}&num_pages=1&date_posted=month${remoteParam}`, {
-            signal: controller.signal, headers,
-          }).then(async (r) => {const data = await r.json(); if (!r.ok) throw new Error(data.error || "The job service is unavailable."); return data;})
-        )
-      );
-
-      if (controller.signal.aborted) return; // a newer search superseded this one
-
-      // Flatten, deduplicate by job_id AND by title+company (aggregators
-      // often list the same role twice via different publishers), normalise
-      const seenId = new Set();
-      const seenTitleCompany = new Set();
-      const allJobs = [];
-      results.forEach((r) => {
-        if (r.status === "fulfilled" && Array.isArray(r.value?.data)) {
-          r.value.data.forEach((item) => {
-            const dupeKey = `${(item.job_title || "").toLowerCase()}|${(item.employer_name || "").toLowerCase()}`;
-            if ((item.job_id && seenId.has(item.job_id)) || seenTitleCompany.has(dupeKey)) return;
-            seenId.add(item.job_id);
-            seenTitleCompany.add(dupeKey);
-            allJobs.push(normalizeJob(item, allJobs.length, profile));
-          });
-        }
-      });
-
-      const failures = results.filter(result => result.status === "rejected");
-      if (!allJobs.length && failures.length) throw failures[0].reason;
-      if (failures.length) setSearchError("Some searches could not complete. These are the results we could retrieve.");
-
-      // Sort by match score descending
-      allJobs.sort((a, b) => (b.match ?? -1) - (a.match ?? -1));
-      cache.current.set(loc, allJobs);
-      setJobs(allJobs);
-      showToast(`Found ${allJobs.length} real job listings!`, "success");
-    } catch (err) {
-      if (err.name === "AbortError") return; // superseded, not a real failure
-      showToast(`Job search error: ${err.message?.slice(0, 80)}`, "error");
-      console.error("generateJobs error:", err);
-      setSearchError(err.message || "Job search is unavailable. Please try again.");
-      setJobs([]);
-    } finally {
-      if (!controller.signal.aborted) {
-        setLoading(false);
-        setSearching(false);
-      }
-    }
-  }, [profile]);
-
-  useEffect(() => {
-    generateJobs("all");
-    return () => abortRef.current?.abort();
-  }, [generateJobs]);
-
-  const boards = [...new Set(jobs.map((j) => j.board))];
-  const filtered = jobs.filter((j) => {
-    if (remoteOnly && !j.remote) return false;
-    if (filter !== "all" && j.board !== filter) return false;
-    return true;
-  });
-
-  const LOCATIONS = [
-    { value: "all", label: "🌍 All Locations" },
-    { value: "Nigeria", label: "🇳🇬 Nigeria" },
-    { value: "United States", label: "🇺🇸 USA" },
-    { value: "United Kingdom", label: "🇬🇧 UK" },
-    { value: "Canada", label: "🇨🇦 Canada" },
-    { value: "Australia", label: "🇦🇺 Australia" },
-    { value: "Germany", label: "🇩🇪 Germany" },
-    { value: "Netherlands", label: "🇳🇱 Netherlands" },
-    { value: "UAE", label: "🇦🇪 UAE" },
-    { value: "South Africa", label: "🇿🇦 South Africa" },
-    { value: "Remote", label: "💻 Remote (check eligibility)" },
-  ];
-
-  const getBoardName = (id) => JOB_BOARDS.find((b) => b.id === id)?.name || id;
-  // Prefer the job's real publisher name (e.g. "ZipRecruiter") over the
-  // generic "Company Site" bucket used only for grouping/filtering.
-  const getBoardDisplay = (job) => job.boardLabel || getBoardName(job.board);
-
-  const markApplied = (jobId, method) => {
-    const job = jobs.find((j) => j.id === jobId);
-    if (job) onApply(job, method); // ← saves to localStorage tracker
-    showToast("Job page opened. Mark it submitted in your tracker after you finish applying.", "info");
-  };
-
-  if (loading) {
-    return (
-      <div className="text-center py-24">
-        <div className="text-5xl mb-4 animate-spin">🔍</div>
-        <div className="text-ink/60 font-mono text-sm">Scanning top job boards…</div>
-        <div className="text-ink/30 text-xs mt-2 animate-pulse">LinkedIn · Indeed · Glassdoor · RemoteOK</div>
-      </div>
-    );
-  }
-
-  if (selected) {
-    return <JobDetail job={selected} profile={profile} onBack={() => setSelected(null)} onApply={(method) => { markApplied(selected.id, method); setSelected(null); }} applied={applied[selected.id]} />;
-  }
-
-  return (
-    <div className="max-w-4xl mx-auto">
-      {searchError && <p className="notice error" role="alert">{searchError}</p>}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-ink flex items-center gap-2" style={{ fontFamily: "'Playfair Display', serif" }}>
-            {filtered.length} Job Matches
-            {searching && <span className="text-xs font-sans font-normal text-indigo-400 animate-pulse">🔄 Updating…</span>}
-          </h2>
-          <p className="text-ink/40 text-sm">Sorted by listed skill coverage · Not a hiring probability</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Location picker */}
-          <select
-            aria-label="Job search location" value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            className="px-4 py-2 rounded-xl bg-ink/5 border border-ink/10 text-ink/70 text-sm focus:outline-none focus:border-indigo-400/40"
-          >
-            {LOCATIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-          </select>
-
-          {/* Re-search with new location */}
-          <button
-            onClick={() => { setSearching(true); generateJobs(location); }}
-            disabled={searching}
-            className="px-4 py-2 rounded-xl bg-indigo-400/10 border border-indigo-400/20 text-indigo-400 text-sm font-medium hover:bg-indigo-400/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {searching ? "🔄 Searching…" : "🔍 Search"}
-          </button>
-
-          {/* Remote toggle — shown for all professions */}
-          <button
-            onClick={() => setRemoteOnly((v) => !v)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-              remoteOnly ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-ink/5 border-ink/10 text-ink/50 hover:border-ink/25"
-            }`}
-          >
-            💻 Remote Only
-          </button>
-
-          {/* Board filter */}
-          <select
-            aria-label="Job board filter" value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="px-4 py-2 rounded-xl bg-ink/5 border border-ink/10 text-ink/70 text-sm focus:outline-none focus:border-indigo-400/40"
-          >
-            <option value="all">All Boards</option>
-            {boards.map((b) => <option key={b} value={b}>{getBoardName(b)}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div className={`grid gap-4 transition-opacity duration-300 ${searching ? "opacity-40 pointer-events-none" : "opacity-100"}`}>
-        {filtered.map((job) => (
-          <div
-            key={job.id}
-            className={`rounded-2xl border transition-all duration-200 cursor-pointer group ${
-              applied[job.id] ? "opacity-60 border-ink/5" : "border-ink/8 hover:border-indigo-400/20 hover:bg-ink/3"
-            }`}
-            style={{ background: "var(--bg-card)", padding: "1.25rem 1.5rem" }}
-            role="button" tabIndex={0} aria-label={`View ${job.title} at ${job.company}`}
-            onKeyDown={e => {if (["Enter", " "].includes(e.key)) {e.preventDefault(); setSelected(job);}}}
-            onClick={() => setSelected(job)}
-          >
-            <div className="flex flex-wrap gap-4 items-start">
-              <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                style={{ background: "#0b1e3d" }}
-              >
-                {job.company?.substring(0, 2).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-start gap-2 mb-1">
-                  <span className="text-ink font-semibold group-hover:text-indigo-300 transition-colors">{job.title}</span>
-                  {job.urgent && <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs">🔥 Urgent</span>}
-                  {applied[job.id] && <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs">{applied[job.id] === "submitted" ? "✓ Submitted" : "↗ Opened"}</span>}
-                </div>
-                <div className="text-ink/50 text-sm mb-2">{job.company} · {job.location} · {job.type}</div>
-                <div className="flex flex-wrap gap-2">
-                  {job.remote && <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs">🌍 Remote</span>}
-                  {(job.tags || []).map((t) => <span key={t} className="px-2 py-0.5 rounded-full bg-ink/5 text-ink/40 text-xs">{t}</span>)}
-                  <span className="px-2 py-0.5 rounded-full bg-ink/5 text-ink/40 text-xs">{getBoardDisplay(job)}</span>
-                </div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <div
-                  className="text-lg font-bold font-mono"
-                  style={{ color: job.match >= 90 ? "var(--match-hi)" : job.match >= 75 ? "var(--match-mid)" : "#F59E0B" }}
-                >
-                  {job.match === null ? "—" : `${job.match}%`}
-                </div>
-                <div className="text-ink/30 text-xs">skill coverage</div>
-                <div className="text-ink/50 text-xs mt-1">{job.salary}</div>
-                <div className="text-ink/25 text-xs">{job.postedDays === null ? "Date not listed" : `${job.postedDays}d ago`}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {filtered.length === 0 && (
-        <div className="text-center py-16 text-ink/30">
-          <div className="text-4xl mb-3">🔍</div>
-          No jobs match your current filters
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── JOB DETAIL & APPLY ───────────────────────────────────────────────────────
 function JobDetail({ job, profile, onBack, onApply, applied }) {
   const [tab, setTab] = useState("details");
   const [coverLetter, setCoverLetter] = useState(() => load(`jobai_letter_${job.id}`, ""));
   const [generating, setGenerating] = useState(false);
+  const [letterError, setLetterError] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailCopy, setEmailCopy] = useState(false);
-  // Three-stage apply flow: idle → reviewing → done
-  const [reviewing, setReviewing] = useState(false);
+  const reviewing = Boolean(coverLetter.trim());
 
   useEffect(() => {save(`jobai_letter_${job.id}`, coverLetter);}, [job.id, coverLetter]);
 
@@ -816,6 +548,8 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
   const applyUrl = job.applyUrl || `${board.url}${searchQuery}`;
 
   const generateCoverLetter = async () => {
+    setLetterError('');
+    if (!profile.name && !profile.experience?.length && !profile.projects?.length) {setLetterError('Add your experience in the CV builder before asking for a letter. We need your facts to write from.'); return;}
     setGenerating(true);
     setTab("coverletter");
     try {
@@ -832,15 +566,21 @@ Candidate:
 Name: ${profile.name}
 Title: ${profile.title}
 Skills: ${(profile.skills || []).slice(0, 8).join(", ")}
-Experience: ${(profile.experience || []).map((e) => `${e.role} at ${e.company} (${e.duration})`).join("; ")}
+Experience and evidence: ${JSON.stringify(profile.experience || [])}
+Projects: ${JSON.stringify(profile.projects || [])}
+Volunteering: ${JSON.stringify(profile.volunteering || [])}
+Education: ${JSON.stringify(profile.education || [])}
+Certifications: ${(profile.certifications || []).join(", ")}
+Languages: ${(profile.languages || []).join(", ")}
+Portfolio: ${profile.website || ""}
 Key Strengths: ${(profile.keyStrengths || []).join(", ")}
 
 Write a 3-paragraph cover letter. Professional, specific, compelling. Address to Hiring Manager.`}],
       });
       setCoverLetter(letter);
-      setReviewing(true);
       showToast("Cover letter ready — review and edit before applying", "success");
     } catch (err) {
+      setLetterError(err.message || 'The writing service is unavailable. Your draft is still here.');
       showToast(`Cover letter error: ${err.message?.slice(0, 80)}`, "error");
       console.error("Cover letter error:", err);
     } finally {
@@ -877,7 +617,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         });
         showToast(`Job page opened. Review the clipboard before pasting. ${delivered ? `Letter emailed to ${profile.email}` : "Email notifications are not connected"}`, "success");
       } catch {
-        showToast("Job page opened. Review the clipboard before pasting. (Email delivery failed — check EmailJS config)", "warning");
+        showToast("Job page opened. Review the clipboard before pasting. (Your email copy could not be delivered.)", "warning");
       } finally {
         setSendingEmail(false);
       }
@@ -908,17 +648,17 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="job-detail max-w-3xl mx-auto">
       <button onClick={onBack} className="flex items-center gap-2 text-ink/40 hover:text-ink/80 text-sm mb-6 transition-colors">
         ← Back to jobs
       </button>
 
       {/* Job Header */}
       <div
-        className="rounded-2xl p-6 mb-6"
+        className="job-detail-card rounded-2xl p-6 mb-6"
         style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.06), rgba(124,58,237,0.06))", border: "1px solid rgba(99,102,241,0.12)" }}
       >
-        <div className="flex flex-wrap gap-4 items-start mb-4">
+        <div className="job-detail-heading">
           <div
             className="w-14 h-14 rounded-2xl flex items-center justify-center text-sm font-bold text-white"
             style={{ background: "#0b1e3d" }}
@@ -929,13 +669,13 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
             <h2 className="text-xl font-bold text-ink mb-0.5" style={{ fontFamily: "'Playfair Display', serif" }}>{job.title}</h2>
             <div className="text-indigo-400/80 text-sm">{job.company} · {job.location}</div>
             <div className="flex flex-wrap gap-2 mt-2">
-              {job.remote && <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs">🌍 Remote</span>}
+              {job.remote && <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs">Remote · check eligibility</span>}
               <span className="px-2 py-0.5 rounded-full bg-ink/8 text-ink/60 text-xs">{job.type}</span>
               <span className="px-2 py-0.5 rounded-full bg-ink/8 text-ink/60 text-xs">{boardName}</span>
               {job.urgent && <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs">🔥 Urgent</span>}
             </div>
           </div>
-          <div className="text-right">
+          <div className="job-detail-coverage">
             <div className="text-2xl font-bold font-mono" style={{ color: job.match >= 90 ? "var(--match-hi)" : job.match >= 75 ? "var(--match-mid)" : "#F59E0B" }}>
               {job.match === null ? "—" : `${job.match}%`}
             </div>
@@ -979,7 +719,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
               </button>
             </div>
             <p className="text-ink/25 text-xs mt-3">
-              Open listing & copy letter opens the real job page + copies your cover letter to clipboard + sends you a confirmation email. You paste and submit — nothing is submitted without you.
+              Open listing & copy letter opens the employer’s page and copies your letter. Email is sent only if you choose it below. You paste and submit — nothing is submitted without you.
             </p>
           </div>
         ) : (
@@ -1002,8 +742,10 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         )}
       </div>
 
+      <p className="form-help">AI letter writing sends your profile and this posting to the writing provider. Drafts are kept on this device. Review the facts before using them.</p>
       {profile.email && <label className="consent"><input type="checkbox" checked={emailCopy} onChange={event => setEmailCopy(event.target.checked)} />Email a copy of my preparation to {profile.email} when I open the listing.</label>}
 
+      {letterError && <div className="notice error" role="alert">{letterError}<div className="button-row"><a className="text-link" href="/builder">Open my CV →</a><a className="text-link" href="/account">My workspace →</a></div></div>}
       {/* Tabs */}
       <div className="flex gap-1 mb-4 bg-ink/3 rounded-xl p-1">
         {["details", "requirements", "coverletter"].map((t) => (
@@ -1024,7 +766,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         {tab === "details" && (
           <div>
             <h3 className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">About the Role</h3>
-            <p className="text-ink/70 text-sm leading-relaxed mb-6">{job.description}</p>
+            <p className="job-description text-ink/70 text-sm leading-relaxed mb-6">{job.description}</p>
             <div className="grid grid-cols-2 gap-4 text-sm">
               {[["Industry", job.industry], ["Posted", job.postedDays === null ? "Not listed" : `${job.postedDays} days ago`], ["Location", job.location], ["Type", job.type]].map(([k, v]) => (
                 <div key={k} className="bg-ink/3 rounded-xl p-3">
@@ -1067,7 +809,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                   className="w-full bg-ink/3 border border-ink/8 rounded-xl text-ink/80 text-sm leading-relaxed p-4 resize-none focus:outline-none focus:border-indigo-400/30"
                   style={{ fontFamily: "'Outfit', sans-serif" }}
                 />
-                <div className="flex gap-3 mt-3">
+                <div className="flex flex-wrap gap-3 mt-3"><button className="text-link" onClick={() => {if (window.confirm('Delete this letter draft from this device?')) {setCoverLetter(''); localStorage.removeItem(`jobai_letter_${job.id}`);}}}>Delete letter draft</button>
                   <button
                     onClick={async () => { try {await navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success");} catch {showToast("Clipboard access failed. Copy the text from the letter above.", "warning");} }}
                     className="px-4 py-2 rounded-xl bg-ink/8 text-ink/60 text-sm hover:bg-ink/12 transition-all"
@@ -1132,7 +874,7 @@ function TrackerPanel({ applications, onClose, onStatusChange, onDelete }) {
     document.addEventListener("keydown", keydown);
     return () => {document.removeEventListener("keydown", keydown); previous?.focus();};
   }, [onClose]);
-  const statuses = { manual: "Opened listing", assisted: "One-click assisted" };
+  const statuses = { manual: "Opened listing", assisted: "Opened with prepared letter" };
   return (
     <div
       className="fixed inset-0 z-40 flex justify-end"
@@ -1178,13 +920,13 @@ function TrackerPanel({ applications, onClose, onStatusChange, onDelete }) {
 // ─── JOB WORKFLOW ─────────────────────────────────────────────────────────────
 // Tiny localStorage helpers
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* Storage or optional notifications may be unavailable. */ } };
-const load = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
+const load = (key, fallback) => readStored(key, fallback, value => typeof value === typeof fallback);
 
-export default function JobSearch({ forceUpload = false, onProfileParsed }) {
-  const [step, setStep] = useState(() => forceUpload ? 0 : load("jobai_step", 0));
+export default function JobSearch({ forceUpload = false, onProfileParsed, onImport, onBuildCV }) {
+  const [step, setStep] = useState(() => forceUpload ? 0 : readStored("jobai_step", 3, value => [0, 2, 3].includes(value)));
   const [uploadData, setUploadData] = useState(null);
-  const [profile, setProfile] = useState(() => load("jobai_profile", null));
-  const [applications, setApplications] = useState(() => load("jobai_applications", []));
+  const [profile, setProfile] = useState(() => readJobProfile(normalizeProfile));
+  const [applications, setApplications] = useState(() => readActivity());
   const [showTracker, setShowTracker] = useState(false);
   const closeTracker = useCallback(() => setShowTracker(false), []);
 
@@ -1246,9 +988,9 @@ export default function JobSearch({ forceUpload = false, onProfileParsed }) {
   return (
     <>
       {/* Main Content */}
-      <main id="main-content" className="px-4 py-10 max-w-5xl mx-auto fade-in">
-        <div className="flex flex-wrap justify-end gap-3 mb-6"><button className="button secondary" onClick={() => setShowTracker(true)}>Application activity ({applications.length})</button><button className="text-link" onClick={handleReset}>Upload another CV</button></div>
-        <StepIndicator current={step} />
+      <main id="main-content" tabIndex={-1} className="job-workflow container fade-in">
+        <div className="flex flex-wrap justify-end gap-3 mb-6"><button className="button secondary" onClick={() => setShowTracker(true)}>Application activity ({applications.length})</button><button className="text-link" onClick={() => step === 0 ? setStep(3) : handleReset()}>{step === 0 ? "Explore jobs instead" : profile ? "Import a different CV" : "Import a CV"}</button></div>
+        {step < 3 && (uploadData || step === 0) && <StepIndicator current={step} />}
 
         {step === 0 && <UploadStep onNext={handleUpload} />}
         {step === 1 && uploadData && (
@@ -1257,15 +999,18 @@ export default function JobSearch({ forceUpload = false, onProfileParsed }) {
         {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
         {step === 1 && !uploadData && <UploadStep onNext={handleUpload} />}
         {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
-        {step === 3 && profile && (
-          <JobsStep
+        {step === 3 && (
+          <JobExplorer
             applications={applications}
-            profile={profile}
+            profile={profile || EMPTY_PROFILE}
+            onImport={onImport || handleReset}
+            onEditProfile={profile ? () => setStep(2) : onBuildCV}
+            DetailComponent={JobDetail}
             onApply={handleApply}
           />
         )}
         {/* If step=2 or 3 but profile lost somehow, go back to upload */}
-        {(step === 2 || step === 3) && !profile && <UploadStep onNext={handleUpload} />}
+        {step === 2 && !profile && <UploadStep onNext={handleUpload} />}
       </main>
 
       {showTracker && <TrackerPanel applications={applications} onClose={closeTracker} onStatusChange={handleStatusChange} onDelete={handleDelete} />}

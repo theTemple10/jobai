@@ -7,6 +7,8 @@ import { authorize, rateLimit } from '../server/protection.js';
 test('AI operations bound tokens and model selection on the server', () => {
   const result=buildRequest({operation:'rewrite',text:'I build accessible interfaces.',model:'arbitrary',max_tokens:999999});
   assert.equal(result.max_tokens,700);assert.notEqual(result.model,'arbitrary');assert.equal(result.messages.length,2);
+  assert.throws(()=>buildRequest({operation:'parse',useVision:true,messages:[{role:'user',content:[null]}]}),{status:400});
+  assert.throws(()=>buildRequest({operation:'parse',useVision:'true',messages:[{role:'user',content:'text'}]}),{status:400});
   assert.throws(()=>buildRequest({operation:'toString',text:'x'}));
   assert.throws(()=>buildRequest({operation:'rewrite',text:'x'.repeat(12001)}));
 });
