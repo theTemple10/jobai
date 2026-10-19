@@ -1,0 +1,117 @@
+{
+  "accessibility": [
+    {
+      "theme": "light",
+      "route": "home",
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 17
+    },
+    {
+      "theme": "light",
+      "route": "builder",
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 20
+    },
+    {
+      "theme": "light",
+      "route": "jobs",
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".block"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 4.34 (foreground color: #697485, background color: #f7f5f0, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 23
+    },
+    {
+      "theme": "light",
+      "route": "account",
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 16
+    },
+    {
+      "theme": "dark",
+      "route": "home",
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 17
+    },
+    {
+      "theme": "dark",
+      "route": "builder",
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 20
+    },
+    {
+      "theme": "dark",
+      "route": "jobs",
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 23
+    },
+    {
+      "theme": "dark",
+      "route": "account",
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ],
+      "passes": 16
+    }
+  ],
+  "workflows": [
+    {
+      "name": "Reload without explicit saving",
+      "actual": "",
+      "warningBeforeReload": false
+    },
+    {
+      "name": "Empty CV export",
+      "pdfButtonEnabled": true
+    },
+    {
+      "name": "New cover letter can be assisted",
+      "buttonVisible": 2
+    },
+    {
+      "name": "Restored cover letter assist",
+      "letter": "Dear Hiring Manager, I build JavaScript tools. Regards, Ada.",
+      "buttonVisible": 0
+    },
+    {
+      "name": "Existing CV CTA with prior profile",
+      "uploadShown": 0,
+      "resultsShown": 1
+    }
+  ],
+  "coverage": "Live site, real browser; provider success and saved-profile scenarios use explicit interception only."
+}

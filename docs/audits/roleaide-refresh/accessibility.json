@@ -1,0 +1,92 @@
+[
+  {
+    "theme": "light",
+    "route": "/",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "light",
+    "route": "/builder",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "light",
+    "route": "/jobs",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "light",
+    "route": "/account",
+    "violations": [],
+    "manualChecks": []
+  },
+  {
+    "theme": "light",
+    "route": "/help",
+    "violations": [],
+    "manualChecks": []
+  },
+  {
+    "theme": "light",
+    "route": "/privacy",
+    "violations": [],
+    "manualChecks": []
+  },
+  {
+    "theme": "dark",
+    "route": "/",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "dark",
+    "route": "/builder",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "dark",
+    "route": "/jobs",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "dark",
+    "route": "/account",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "dark",
+    "route": "/help",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  },
+  {
+    "theme": "dark",
+    "route": "/privacy",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  }
+]

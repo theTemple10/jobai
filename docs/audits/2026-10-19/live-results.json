@@ -1,0 +1,129 @@
+{
+  "date": "2026-10-19",
+  "screens": [
+    {
+      "name": "landing",
+      "status": 200,
+      "url": "https://jobai-orpin.vercel.app/",
+      "text": "YOUR NEXT CHAPTER STARTS HERE\nYou have a story.\nLet’s help it\nopen doors.\n\nThe job search can feel like a lot. Your CV doesn’t have to.\n\nWhether you’re writing your first resume or finding a better way to tell your experience, JobAI gives you a place to begin. Put your ideas into words, discover roles to explore, and prepare an application you can stand behind.\n\nBuild my CV\n↗\nI already have a CV\n→\n\nStart without an account · Your words stay editable · Go at your own pace\n\n✧\n✦\n✓\nYour story, clearly told\nOne step at a time\n↗\nA little structure. A fresh start.\n☀\nA SMALL REMINDER FOR TODAY\n“Begin with one thing you helped make better.”\n\nWords from JobAI · A new reminder each day\n\nFROM A BLANK PAGE TO A NEXT STEP\nYou don’t have to do\neverything at once.\n\nBring what you have. We’ll help you give it shape, then make the next part of your search a little easier.\n\n01\nStart with your story\n\nNo CV yet? Choose the sections that fit you and add a few details. Have one already? Upload it to extract a starting profile, then check that we got it right.\n\n02\nMake it clear and useful\n\nTurn your experience into a readable, single-column CV. Review the wording, keep the facts yours, and download a document you can edit or share.\n\n03\nTake a thoughtful next step\n\nExplore job listings, prepare a cover letter, and open the employer’s application page. You review and submit it yourself, with your own judgment in charge.\n\nYOUR NAME\nYour next opportunity\nEXPERIENCE\nPROJECTS & SKILLS\nMade with your experience.\nTHERE’S MORE THAN ONE WAY TO HAVE EXPERIENCE\nYour first CV doesn’t\nneed a first job.\n\nA course project. A community you helped. Something you built on a borrowed laptop. Work you did for a family business. These can all help tell a useful story when they’re relevant to the role.\n\nChoose what belongs on your CV. We’ll give it a clean structure, with familiar headings and readable text. You supply the facts; the document helps them speak clearly.\n\nLet’s find your starting point ↗\nA LITTLE HELP. YOUR OWN VOICE.\nUseful support,\nhonest expectations.\n\nYou deserve to understand what a tool can do before trusting it with your career.\n\n✓\nMade for people and readable by software\n\nSimple layouts and clear sections help resume parsers. No template can guarantee an interview or work perfectly with every applicant tracking system.\n\n✓\nYour experience stays yours\n\nReview every extracted fact and suggested line. We encourage clear writing, never invented jobs, qualifications, or achievements.\n\n✓\nYou decide what happens next\n\nApplication assistance prepares your letter and opens a listing. It doesn’t submit on your behalf or promise an outcome.\n\nNO PERFECT START REQUIRED\nA few pointers are enough\nto begin.\n\nYou can come back, change your words, and build on what you’ve done. For now, let’s make the blank page a little less blank.\n\nStart my CV\n↗",
+      "overflow": false
+    },
+    {
+      "name": "builder",
+      "status": 200,
+      "url": "https://jobai-orpin.vercel.app/#/builder",
+      "text": "YOUR EXPERIENCE. A LITTLE MORE STRUCTURE.\nLet’s tell your story.\n\nStart with a few details. Choose what fits, and leave out what doesn’t.\n\nImport an existing CV ↗\nYOUR SECTIONS\nContact & target role\n→\nInclude Professional summary\nProfessional summary\nInclude Work experience\nWork experience\nInclude Education\nEducation\nInclude Projects\nProjects\nInclude Skills\nSkills\nInclude Certifications\nCertifications\nInclude Volunteering\nVolunteering\nInclude Languages\nLanguages\n\nNo work experience yet? Projects, education, and volunteering can be a good starting point.\n\nReview & download\n↗\nLET’S START WITH YOU\nThe essentials\n\nUse contact details you’re happy to share with an employer. A city and country are enough; you don’t need a full street address.\n\nFull name\nTarget role\nEmail\nPhone (optional)\nCity, country (optional)\nPortfolio or LinkedIn URL (optional)\nSave on this device\nDelete device draft\n\nDrafts stay in this tab until you choose to save. Downloads work without an account.\n\nLIVE PREVIEW\nSingle column · A4 exports\n✧\nThis page is yours.\n\nAdd your name and a few details to see your story take shape.\n\nThe downloaded document has clean formatting. It won’t include the app’s decorations or checklist.",
+      "overflow": false
+    },
+    {
+      "name": "jobs",
+      "status": 200,
+      "url": "https://jobai-orpin.vercel.app/#/jobs",
+      "text": "Application activity (0)\nUpload another CV\n1\nUpload CV\n2\nAnalysis\n3\nProfile\n4\nExplore & prepare\nSTEP 01 / UPLOAD YOUR CV\nStart Your Job Search\n\nUpload your CV and our AI will extract your skills, experience, and suggest the best-matched jobs across top boards.\n\n⬆\nDrop your CV here\nPDF / Word up to 10MB · PNG / JPG / WebP up to 3MB\nADDITIONAL CONTEXT (OPTIONAL)\nI agree to send this CV’s text or image to the AI provider for analysis. The extracted profile will be saved on this device.\nAnalyse CV with AI →",
+      "overflow": false
+    },
+    {
+      "name": "account",
+      "status": 200,
+      "url": "https://jobai-orpin.vercel.app/#/account",
+      "text": "A PLACE TO PICK UP WHERE YOU LEFT OFF\nYour workspace\n\nKeep versions of your CV together, and come back when you’re ready for the next step.\n\nAccount saving is being connected.\n\nYou can build and download a CV now. Until cloud storage is connected, a draft can be saved on this device from the CV builder.\n\nContinue to the builder →",
+      "overflow": false
+    }
+  ],
+  "checks": [
+    {
+      "name": "responsive",
+      "width": 320,
+      "route": "builder",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 320,
+      "route": "jobs",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 320,
+      "route": "account",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 375,
+      "route": "builder",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 375,
+      "route": "jobs",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 375,
+      "route": "account",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 768,
+      "route": "builder",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 768,
+      "route": "jobs",
+      "overflow": false
+    },
+    {
+      "name": "responsive",
+      "width": 768,
+      "route": "account",
+      "overflow": false
+    },
+    {
+      "name": "natural typing spaces",
+      "expected": "Ada Obi",
+      "actual": "AdaObi"
+    },
+    {
+      "name": "natural multiline typing",
+      "actual": "Ibuildtools.Forpeople."
+    },
+    {
+      "name": "skip link from builder",
+      "url": "https://jobai-orpin.vercel.app/#main-content",
+      "heading": "You have a story.\nLet’s help it\nopen doors."
+    },
+    {
+      "name": "live API no account",
+      "path": "/api/jobs?query=developer",
+      "status": 503,
+      "body": "{\"error\":\"Account access is not connected yet. You can still build and download a CV.\"}"
+    },
+    {
+      "name": "live API no account",
+      "path": "/api/groq",
+      "status": 503,
+      "body": "{\"error\":\"Account access is not connected yet. You can still build and download a CV.\"}"
+    },
+    {
+      "name": "live API no account",
+      "path": "/api/groq",
+      "status": 503,
+      "body": "{\"error\":\"Account access is not connected yet. You can still build and download a CV.\"}"
+    },
+    {
+      "name": "malformed local application activity",
+      "errors": [
+        "n.filter is not a function"
+      ],
+      "text": ""
+    }
+  ],
+  "pageErrors": []
+}

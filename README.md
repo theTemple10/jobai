@@ -1,6 +1,6 @@
-# JobAI
+# RoleAide
 
-A guided CV builder and job-application preparation workspace by Philos Digital Labs.
+A guided CV builder, job-discovery tool, and application-preparation workspace by Philos Digital Labs.
 
 Start with your own facts, import an existing CV, or choose sections and write a few pointers. Review the result, download a readable document, and prepare your next application.
 
@@ -76,3 +76,16 @@ Vercel target: `thetemple10s-projects/jobai`. Use feature-branch previews and re
 Account saving needs deployed Supabase configuration and live verification. Application activity and cover-letter drafts currently remain on the device. CV editing is manual with optional summary wording assistance; comprehensive job-specific CV tailoring is a future batch. PDF font coverage and export pagination should be checked for each supported language and unusually long document. Scanned PDFs need image conversion or manual entry.
 
 Operating cost depends on provider plans, traffic, token usage, and hosting terms; no permanent $0 operating claim is made. The baseline assessment in [CODEBASE_REVIEW.md](CODEBASE_REVIEW.md) records the pre-change findings, not the current implementation state.
+
+
+## RoleAide refresh
+
+The product now uses RoleAide as its working public identity. The GitHub repository, Vercel project, Supabase target, and existing `jobai_*` device/database keys keep their current names so integrations and returning users retain their data. No new domain has been purchased or claimed.
+
+The Find Jobs workspace supports direct role/location search without a CV upload, one provider request per submitted search, skill-context cards, filters, and distinct service/error/loading states. Production search still requires authenticated server access.
+
+New URLs are `/builder`, `/jobs`, `/account`, `/privacy`, and `/help`. Existing `/#/...` links continue to resolve. The build renders public landing/help/privacy HTML, creates workspace pages with `noindex`, and generates canonical metadata, sitemap, robots file, manifest, and social tags. Only public information pages belong in the sitemap. `VITE_PUBLIC_SITE_URL` must be the real production HTTPS origin; it defaults to the existing Vercel domain. Preview builds get `noindex` metadata. A domain change needs this setting updated and a rebuild, plus Auth redirect settings and Search Console verification.
+
+Run `npm run build` followed by `npm run test:seo` to validate public markup, workspace indexing, and icon dimensions. The SVG source files in `public/` are the editable identity assets. `og-image.png` is a 1200×630 social image; favicon variants include 32, 192, and 512 pixels, plus a 180-pixel Apple touch icon.
+
+Device autosaving is off until explicitly enabled. An unsaved-work browser warning protects active edits where supported. A sign-in recovery copy requires consent, restores for up to 30 minutes, and is removed when the app next starts. Account saving, remote policies, email delivery, and paid-provider behavior still require live acceptance testing after configuration.

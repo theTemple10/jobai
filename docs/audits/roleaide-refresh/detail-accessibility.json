@@ -1,0 +1,16 @@
+[
+  {
+    "theme": "light",
+    "route": "job-detail",
+    "violations": [],
+    "manualChecks": []
+  },
+  {
+    "theme": "dark",
+    "route": "job-detail",
+    "violations": [],
+    "manualChecks": [
+      "color-contrast"
+    ]
+  }
+]
