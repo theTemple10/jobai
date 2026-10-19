@@ -24,7 +24,7 @@ export default function AccountPanel({ user, onOpenResume, navigate, hasDraft, o
     try {
       if (hasDraft && !recoveryConsent) throw new Error('Please allow a recovery copy before leaving this CV to sign in. You can also download it and return later.');
       onPrepareSignIn();
-      const {error} = await supabase.auth.signInWithOtp({email: email.trim(), options: {emailRedirectTo: `${window.location.origin}/`}});
+      const {error} = await supabase.auth.signInWithOtp({email: email.trim(), options: {emailRedirectTo: `${window.location.origin}/account`}});
       if (error) throw error;
       setMessage('Check your email for a sign-in link. You can keep working here while you wait.');
     } catch (err) { setError(err.message); } finally {setBusy(false);}

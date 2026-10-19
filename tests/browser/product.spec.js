@@ -13,7 +13,7 @@ test('landing and builder fit mobile widths and respect reduced motion', async (
     if (width === 1440) await page.screenshot({path:'/tmp/jobai-landing-desktop.png',fullPage:true});
     if (width === 375) await page.screenshot({path:'/tmp/jobai-landing-mobile.png',fullPage:true});
     await page.getByRole('button',{name:'Build my CV'}).click();
-    await expect(page.getByRole('heading',{level:1})).toHaveText('Let’s tell your story.');
+    await expect(page.getByRole('heading',{level:1})).toHaveText('You don’t need to write a CV from scratch.');
     expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (width === 1440) await page.screenshot({path:'/tmp/jobai-builder-desktop.png',fullPage:true});
   }
@@ -28,7 +28,7 @@ test('existing Word CV imports into editable builder fields',async({page})=>{
     expect(buildRequest(payload).messages[1].content).toContain('Ada Obi');
     await route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Obi',title:'Frontend Developer',skills:['JavaScript'],experience:[],education:[]})}}]})});
   });
-  await page.goto('/#/builder');await page.getByRole('button',{name:'Import an existing CV'}).click();
+  await page.goto('/builder?mode=editor');await page.getByRole('button',{name:'Import an existing CV'}).click();
   await page.locator('input[type=file]').setInputFiles({name:'existing-cv.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',buffer});
   await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
   await expect(page.getByLabel('Full name')).toHaveValue('Ada Obi');
@@ -50,7 +50,7 @@ test('opened listing becomes submitted only after user confirmation',async({page
 });
 
 test('a first CV exports selectable PDF and editable DOCX from reviewed facts', async ({page}) => {
-  await page.goto('/#/builder');
+  await page.goto('/builder?mode=editor');
   await page.getByLabel('Full name').fill('Ada Ọbí');
   await page.getByLabel('Target role',{exact:true}).fill('Frontend Developer');
   await page.getByLabel('Email',{exact:true}).fill('ada@example.com');
@@ -72,7 +72,7 @@ test('a first CV exports selectable PDF and editable DOCX from reviewed facts', 
 });
 
 test('draft saving is explicit, recoverable, and removable',async({page})=>{
-  await page.goto('/#/builder');await page.getByLabel('Full name').fill('Saved candidate');
+  await page.goto('/builder?mode=editor');await page.getByLabel('Full name').fill('Saved candidate');
   expect(await page.evaluate(()=>localStorage.getItem('jobai_resume_draft'))).toBeNull();
   await page.getByRole('button',{name:'Save on this device'}).click();await page.reload();
   await expect(page.getByLabel('Full name')).toHaveValue('Saved candidate');
@@ -88,7 +88,7 @@ test('job provider failure is a persistent error without fictional listings',asy
 });
 
 test('normal keyboard entry preserves words, paragraphs, and achievements',async({page})=>{
-  await page.goto('/builder');
+  await page.goto('/builder?mode=editor');
   await page.getByLabel('Full name',{exact:true}).pressSequentially('Ada Obi');
   await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Ada Obi');
   await page.getByRole('button',{name:'Professional summary',exact:true}).click();
@@ -102,8 +102,8 @@ test('normal keyboard entry preserves words, paragraphs, and achievements',async
 });
 
 test('skip navigation retains the active tool and focuses its content',async({page})=>{
-  await page.goto('/builder');await page.getByRole('link',{name:'Skip to content'}).focus();await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/builder$/);await expect(page.locator('main')).toBeFocused();
+  await page.goto('/builder?mode=editor');await page.getByRole('link',{name:'Skip to content'}).focus();await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/builder(?:\?mode=editor)?$/);await expect(page.locator('main')).toBeFocused();
   await page.getByRole('link',{name:'Find jobs',exact:true}).click();await expect(page).toHaveURL(/\/jobs$/);
   await page.goBack();await expect(page.getByRole('heading',{level:1})).toHaveText('Let’s tell your story.');
 });
@@ -116,7 +116,7 @@ test('unexpected saved activity cannot blank job search',async({page})=>{
 });
 
 test('automatic device saving is explicit and preserves later edits',async({page})=>{
-  await page.goto('/builder');await page.getByLabel('Full name',{exact:true}).fill('Ada Obi');
+  await page.goto('/builder?mode=editor');await page.getByLabel('Full name',{exact:true}).fill('Ada Obi');
   expect(await page.evaluate(()=>localStorage.getItem('jobai_resume_draft'))).toBeNull();
   await page.getByLabel('Keep this draft updated on this device.').check();
   await expect(page.getByText(/Saved on this device at/)).toBeVisible();
@@ -163,7 +163,7 @@ test('job cards and detail actions fit narrow screens in both themes',async({pag
 });
 
 test('empty documents cannot be exported and mobile preview is easy to reach',async({page})=>{
-  await page.setViewportSize({width:375,height:900});await page.goto('/builder');
+  await page.setViewportSize({width:375,height:900});await page.goto('/builder?mode=editor');
   await page.getByRole('button',{name:'Review & download'}).click();await page.getByLabel('I have reviewed this CV').check();await expect(page.getByRole('button',{name:'Download PDF'})).toBeDisabled();
   await page.getByRole('button',{name:'Contact & target role'}).click();await page.getByLabel('Full name',{exact:true}).fill('Ada Obi');
   await page.getByRole('button',{name:'Preview my CV',exact:true}).click();await expect(page.getByRole('heading',{name:'Ada Obi',exact:true})).toBeVisible();
@@ -172,6 +172,79 @@ test('empty documents cannot be exported and mobile preview is easy to reach',as
 
 test('sign-in recovery copies restore only in their short recovery window',async({page})=>{
   await page.addInitScript(()=>localStorage.setItem('jobai_auth_handoff',JSON.stringify({document:{name:'Recovery candidate',title:'Developer'},cloudId:null,at:Date.now()})));
-  await page.goto('/builder');await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Recovery candidate');
+  await page.goto('/builder?mode=editor');await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Recovery candidate');
   expect(await page.evaluate(()=>localStorage.getItem('jobai_auth_handoff'))).toBeNull();
+});
+
+async function reachGuidedDraft(page) {
+  await page.goto('/builder');
+  await page.getByRole('button',{name:'Frontend developer',exact:true}).click();
+  await page.getByRole('button',{name:'Continue →',exact:true}).click();
+  await page.getByLabel('A project I worked on').check();
+  await page.getByRole('button',{name:'Continue →',exact:true}).click();
+  await page.getByLabel('Your short answer').fill('Built keyboard navigation for a community directory using JavaScript.');
+  await page.getByRole('button',{name:'Continue →',exact:true}).click();
+  await page.getByRole('button',{name:'+ JavaScript',exact:true}).click();
+  await page.getByRole('button',{name:'Continue →',exact:true}).click();
+  await page.getByLabel('Full name',{exact:true}).fill('Ada Obi');
+  await page.getByRole('button',{name:'Continue →',exact:true}).click();
+}
+
+test('guided guest journey reaches a real export and job discovery without AI',async({page})=>{
+  let aiRequests=0;page.on('request',request=>{if(request.url().includes('/api/groq')) aiRequests++;});
+  await reachGuidedDraft(page);
+  await page.getByRole('button',{name:'Arrange my notes →',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Does this sound like you?'})).toBeVisible();
+  await page.getByRole('button',{name:'Use this draft →',exact:true}).click();
+  await page.getByLabel('I have reviewed this CV').check();
+  const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:'Download PDF ↓',exact:true}).click();
+  const pdf=await downloaded;const text=execFileSync('pdftotext',[await pdf.path(),'-'],{encoding:'utf8'});
+  expect(text).toContain('Ada Obi');expect(text).toContain('keyboard navigation');expect(aiRequests).toBe(0);
+  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})}));
+  await page.getByRole('button',{name:'Explore jobs for this profile →'}).click();
+  await expect(page.getByRole('heading',{level:1})).toHaveText('Find your next possibility.');
+  await expect(page.getByText('No listings came back this time.')).toBeVisible();
+});
+
+test('guided answers recover at the unfinished step after explicit saving',async({page})=>{
+  await reachGuidedDraft(page);
+  await page.getByRole('button',{name:'Save my answers',exact:true}).click();await page.reload();
+  await expect(page.getByRole('heading',{name:'You’ve given us a starting point.'})).toBeVisible();
+  await expect(page.getByText('Built keyboard navigation for a community directory using JavaScript.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'← Back',exact:true}).click();
+  await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Ada Obi');
+});
+
+test('guided AI drafting sends notes only and preserves a fallback on failure',async({page})=>{
+  await reachGuidedDraft(page);
+  let attempts=0;
+  await page.route('**/api/groq',async route=>{
+    const payload=route.request().postDataJSON();expect(payload.operation).toBe('draft');expect(JSON.stringify(payload)).not.toContain('Ada Obi');
+    expect(buildRequest(payload).messages[1].content).toContain('keyboard navigation');
+    attempts++;
+    if(attempts===1) return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Writing is unavailable.'})});
+    return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({projects:[{bullets:'Built keyboard navigation for a community directory using JavaScript.'}]})}}]})});
+  });
+  await expect(page.getByRole('button',{name:'Suggest an AI draft',exact:true})).toBeDisabled();
+  await page.getByLabel('Send these notes for an AI draft.').check();
+  await page.getByRole('button',{name:'Suggest an AI draft',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Writing is unavailable.');
+  await expect(page.getByRole('button',{name:'Arrange my notes →',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Suggest an AI draft',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Does this sound like you?'})).toBeVisible();
+  await expect(page.getByText('Ada Obi',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'← Back to my notes',exact:true}).click();
+  await expect(page.getByText('Built keyboard navigation for a community directory using JavaScript.',{exact:true})).toBeVisible();
+});
+
+test('guided choices and draft review fit small screens in both themes',async({page})=>{
+  await page.setViewportSize({width:320,height:850});
+  for(const theme of ['light','dark']) {
+    await page.goto('/');await page.evaluate(theme=>localStorage.setItem('jobai_theme',JSON.stringify(theme)),theme);
+    await reachGuidedDraft(page);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.getByRole('button',{name:'Arrange my notes →',exact:true}).click();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:`/tmp/roleaide-guided-${theme}-mobile.png`,fullPage:true});
+  }
 });

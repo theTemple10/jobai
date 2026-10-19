@@ -4,6 +4,7 @@ import { dailyEncouragement } from './quotes.js';
 
 function PaperCompanion() {
   return <div className="hero-art" aria-hidden="true">
+    <div className="hero-people"><img className="people-working" src="/images/people-at-work.webp" width="720" height="900" alt="" decoding="async"/><img className="people-talking" src="/images/people-in-conversation.webp" width="600" height="800" alt="" decoding="async"/></div>
     <div className="orbit orbit-one" /><div className="orbit orbit-two" />
     <span className="art-spark spark-one">✧</span><span className="art-spark spark-two">✦</span>
     <div className="paper-pal">
@@ -26,7 +27,6 @@ export default function LandingPage({ navigate, onImport }) {
   return <main id="main-content" className="landing">
     <section className="landing-hero container">
       <div className="hero-copy">
-        <span className="eyebrow"><span /> YOUR NEXT CHAPTER STARTS HERE</span>
         <h1>You have a story.<br />Let’s help it<br /><em>open doors.</em></h1>
         <p className="hero-intro">The job search can feel like a lot. Your CV doesn’t have to.</p>
         <p>Whether you’re writing your first resume or finding a better way to tell your experience, {BRAND.name} gives you a place to begin. Put your ideas into words, discover roles to explore, and prepare an application you can stand behind.</p>

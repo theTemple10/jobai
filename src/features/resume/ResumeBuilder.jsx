@@ -2,6 +2,11 @@ import { useRef, useState } from 'react';
 import { SECTIONS, normalizeResume, resumeBlocks, reviewResume } from './resume.js';
 import { exportDocx, exportPdf, exportText } from './exportResume.js';
 import { saveCloudResume, supabase } from '../account/supabase.js';
+import GuidedStart from './GuidedStart.jsx';
+import ResumePreview from './ResumePreview.jsx';
+import Field from './CVField.jsx';
+import { hasDraft } from './drafts.js';
+import { arrangeNotes } from './guidedDraft.js';
 import { requestAI } from '../../shared/lib/ai.js';
 
 const GROUPS = {
@@ -11,12 +16,9 @@ const GROUPS = {
   volunteering: {name: 'role', fields: [['role', 'Your role'], ['company', 'Organisation'], ['dates', 'Dates'], ['bullets', 'Your contributions. One point per line.']]},
 };
 
-function Field({label, value, onChange, multiline, ...props}) {
-  return <label className="field">{label}{multiline ? <textarea rows={4} value={value} onChange={e => onChange(e.target.value)} {...props} /> : <input value={value} onChange={e => onChange(e.target.value)} {...props} />}</label>;
-}
-
 export default function ResumeBuilder({ resume: initial, onChange, user, cloudId, onCloudSaved, onImport, onFindJobs, navigate, onNew, dirty, autoSave, onAutoSave, savedAt, onDeviceSaved }) {
   const r = normalizeResume(initial);
+  const [guided,setGuided] = useState(() => new URLSearchParams(window.location.search).get('mode') !== 'editor' && (initial.intake ? !initial.intake.completed : !hasDraft(initial)));
   const [active, setActive] = useState('details');
   const [view, setView] = useState('edit');
   const editorRef = useRef(null);
@@ -36,11 +38,11 @@ export default function ResumeBuilder({ resume: initial, onChange, user, cloudId
 
   async function run(action, task) {
     setBusy(action); setError(''); setNotice('');
-    try {await task();} catch (err) {setError(err.message || 'Something went wrong. Your draft is still here.');} finally {setBusy('');}
+    try {await task(); return true;} catch (err) {setError(err.message || 'Something went wrong. Your draft is still here.'); return false;} finally {setBusy('');}
   }
 
   function saveDevice() {
-    run('local', async () => {localStorage.setItem('jobai_resume_draft', JSON.stringify(r)); onDeviceSaved(); setNotice('Draft saved on this device. On a shared device, delete it when you finish.');});
+    return run('local', async () => {localStorage.setItem('jobai_resume_draft', JSON.stringify(r)); onDeviceSaved(); setNotice('Draft saved on this device. On a shared device, delete it when you finish.');});
   }
 
   async function saveAccount(asNew = false) {
@@ -59,6 +61,15 @@ export default function ResumeBuilder({ resume: initial, onChange, user, cloudId
   function removeDevice() {
     run('delete-local', async () => {localStorage.removeItem('jobai_resume_draft'); onAutoSave(false); onDeviceSaved(true); setNotice('The saved device draft was deleted. Your current editing session remains open.');});
   }
+
+  function openManual() {
+    let document=r;
+    try {if (r.intake?.selected.some(id => r.intake.notes[id].trim())) document=arrangeNotes(r);}
+    catch { /* Keep the raw answers available even before a target role is chosen. */ }
+    if (document.intake) onChange({...document,intake:{...document.intake,completed:true}});
+    setGuided(false);
+  }
+  if (guided) return <main id="main-content" tabIndex={-1} className="container guided-page"><GuidedStart resume={r} onChange={onChange} onAccept={document => {onChange(document); setGuided(false); setActive('review'); setReviewed(false);}} onManual={openManual} onImport={onImport} onSave={saveDevice} autoSave={autoSave} onAutoSave={onAutoSave} dirty={dirty} savedAt={savedAt}/>{error && <p className="notice error" role="alert">{error}</p>}</main>;
 
   return <main id="main-content" className={`builder-page container builder-mode-${view}`}>
     <header className="builder-heading"><div><span className="eyebrow">YOUR EXPERIENCE. A LITTLE MORE STRUCTURE.</span><h1>Let’s tell your story.</h1><p>Start with a few details. Choose what fits, and leave out what doesn’t.</p></div><div className="button-row"><button className="text-link" onClick={onNew}>New CV</button><button className="button secondary" onClick={onImport}>Import an existing CV ↗</button></div></header>
@@ -87,10 +98,7 @@ export default function ResumeBuilder({ resume: initial, onChange, user, cloudId
         <div className="builder-step-actions">{steps.indexOf(active) > 0 && <button className="button secondary" onClick={() => selectSection(steps[steps.indexOf(active) - 1])}>← Previous section</button>}{active !== 'review' && <button className="button primary" onClick={() => selectSection(steps[steps.indexOf(active) + 1])}>{steps[steps.indexOf(active) + 1] === 'review' ? 'Review my CV →' : 'Next section →'}</button>}</div><div className="editor-save"><p className="draft-state" role="status">{dirty ? autoSave ? 'Saving on this device…' : 'Changes in this tab · not saved yet' : savedAt ? `Saved on this device at ${savedAt}` : 'Your editing session is ready'}</p><label className="consent"><input type="checkbox" checked={autoSave} onChange={event => onAutoSave(event.target.checked)} />Keep this draft updated on this device. Use only on a device you trust.</label><button className="button secondary" disabled={Boolean(busy)} onClick={saveDevice}>Save on this device</button>{supabase && <button className="button secondary" disabled={Boolean(busy)} onClick={() => saveAccount()}>{busy === 'cloud' ? 'Saving…' : user ? 'Save to my account' : 'Sign in to save'}</button>}{user && cloudId && <button className="text-link" disabled={Boolean(busy)} onClick={() => saveAccount(true)}>Save as a new CV version</button>}<button className="text-link" onClick={removeDevice}>Delete device draft</button><p className="form-help">Device saving is optional. Unsaved edits stay in this tab. Downloads work without an account.</p></div>
       </section>
 
-      <aside className="preview-panel" aria-label="CV preview"><div className="preview-label"><span className="eyebrow">LIVE PREVIEW</span><span>Single column · A4 exports</span></div><div className="resume-paper">{blocks.length ? blocks.map((block, i) => {
-        const Tag = block.type === 'name' ? 'h2' : block.type === 'heading' ? 'h3' : 'p';
-        return <Tag className={`resume-${block.type}`} key={i}>{block.type === 'bullet' ? '• ' : ''}{block.text}</Tag>;
-      }) : <div className="preview-empty"><span>✧</span><h3>This page is yours.</h3><p>Add your name and a few details to see your story take shape.</p></div>}</div><p className="form-help">The downloaded document has clean formatting. It won’t include the app’s decorations or checklist.</p></aside>
+      <aside className="preview-panel" aria-label="CV preview"><div className="preview-label"><span className="eyebrow">LIVE PREVIEW</span><span>Single column · A4 exports</span></div><ResumePreview resume={r}/><p className="form-help">The downloaded document has clean formatting. It won’t include the app’s decorations or checklist.</p></aside>
     </div>
   </main>;
 }
