@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readStored} from '../src/lib/storage.js';
-import {routeFromLocation} from '../src/lib/navigation.js';
+import {readStored} from '../src/shared/lib/storage.js';
+import {routeFromLocation} from '../src/app/navigation.js';
 
 test('persisted data validates both JSON syntax and shape',()=>{
   for (const value of ['{}','null','invalid','42']) assert.deepEqual(readStored('activity',[],Array.isArray,{getItem:()=>value}),[]);

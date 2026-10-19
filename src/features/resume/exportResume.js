@@ -1,4 +1,4 @@
-import { BRAND } from './brand.js';
+import { BRAND } from '../../shared/lib/brand.js';
 import { resumeBlocks } from './resume.js';
 
 function download(blob, filename) {

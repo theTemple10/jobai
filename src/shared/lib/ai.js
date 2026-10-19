@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase } from '../../features/account/supabase.js';
 
 export async function requestAI(body, signal) {
   const response = await fetch('/api/groq', {

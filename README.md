@@ -7,6 +7,7 @@ Start with your own facts, import an existing CV, or choose sections and write a
 ## Implemented
 
 - Navy, ivory, and gold landing page with light/dark themes, original daily encouragements, and a paper companion that respects reduced-motion preferences.
+- Guided first-CV intake: role choices, relevant-category checkboxes, short notes, and selectable skills. Arrange original words without AI or review an optional AI draft before applying it.
 - Optional CV sections, editable facts, live preview, and reviewed PDF, Word, and plain-text exports.
 - PDF/DOCX text extraction and optional image analysis when a vision-capable provider model is configured.
 - Optional AI wording suggestions based on supplied facts, never a guarantee of correctness.
@@ -16,7 +17,7 @@ Start with your own facts, import an existing CV, or choose sections and write a
 - Supabase email-link authentication and account CV insert/read/update/delete integration. These require the migration and environment configuration below; they are not automatically activated by cloning the repo.
 - Supabase-backed atomic provider quotas, server-selected models/token limits, input validation, and timeouts.
 
-ATS-friendly describes simple formatting and selectable text. JobAI does not promise a universal ATS score, employer acceptance, geographic eligibility, automated submission, or hiring probability. See [CV research and acceptance criteria](docs/ATS_RESEARCH.md).
+ATS-friendly describes simple formatting and selectable text. RoleAide does not promise a universal ATS score, employer acceptance, geographic eligibility, automated submission, or hiring probability. See [CV research and acceptance criteria](docs/ATS_RESEARCH.md).
 
 ## Local development
 
@@ -38,6 +39,8 @@ Apply `supabase/migrations/202610090001_workspace.sql` once. Add the project's p
 
 EmailJS is optional, uses the three `VITE_EMAILJS_*` public values in `.env.example`, and sends only when the user opts in. Delivery failures are reported independently of application activity.
 
+See [live service setup](docs/SERVICE_SETUP.md) for the exact key names, database migration, Auth redirects, and remaining live acceptance tests. Run `npm run check:config` to list missing configuration without printing values. The intake design and competitor references are recorded in [guided CV research](docs/GUIDED_CV_RESEARCH.md).
+
 ## Checks
 
 ```bash
@@ -54,18 +57,18 @@ Regression tests cover document section exclusion, profile validation, determini
 ## Architecture
 
 ```text
-src/ProductApp.jsx        Landing, builder, workspace navigation and sign-in state
-src/components/          LandingPage, ResumeBuilder, AccountPanel
-src/lib/resume.js         Shared factual document model and completeness guidance
-src/lib/exportResume.js   PDF, Word, and plain-text exports
-src/lib/parseDocument.js  PDF and DOCX text extraction
-src/lib/jobs.js           Deterministic job normalization and profile validation
-src/lib/supabase.js       Public client and account CV queries (RLS protected)
-src/JobSearch.jsx         Job discovery, cover letters, local activity
+src/app/                 App shell and navigation
+src/features/resume/     Guided intake, editor, document model, parsing and exports
+src/features/jobs/       Discovery, application preparation and activity
+src/features/account/    Sign-in, workspace and Supabase queries
+src/features/marketing/  Landing, public information and encouragement
+src/shared/              Shared components, services, brand and styles
 api/                     Vercel provider endpoints
-server/protection.js     Verified account identity and shared hourly quotas
+server/                  Identity, quotas and provider operations
 supabase/migrations/     CV ownership policies and atomic usage counters
 ```
+
+See [source organization](docs/ARCHITECTURE.md) for the boundaries and entry points.
 
 Exports use open-licensed Noto Sans for PDF and standard Word paragraphs. Font licensing is included under `public/fonts/OFL.txt`. Document parsers and export tools load separately from the initial landing-page bundle.
 
@@ -73,7 +76,7 @@ Exports use open-licensed Noto Sans for PDF and standard Word paragraphs. Font l
 
 Vercel target: `thetemple10s-projects/jobai`. Use feature-branch previews and review before changing production. See [delivery/configuration plan](docs/DELIVERY_PLAN.md).
 
-Account saving needs deployed Supabase configuration and live verification. Application activity and cover-letter drafts currently remain on the device. CV editing is manual with optional summary wording assistance; comprehensive job-specific CV tailoring is a future batch. PDF font coverage and export pagination should be checked for each supported language and unusually long document. Scanned PDFs need image conversion or manual entry.
+Account saving needs deployed Supabase configuration and live verification. Application activity and cover-letter drafts currently remain on the device. CV creation supports guided notes, optional AI drafting, and the section editor; comprehensive job-specific CV tailoring is a future batch. PDF font coverage and export pagination should be checked for each supported language and unusually long document. Scanned PDFs need image conversion or manual entry.
 
 Operating cost depends on provider plans, traffic, token usage, and hosting terms; no permanent $0 operating claim is made. The baseline assessment in [CODEBASE_REVIEW.md](CODEBASE_REVIEW.md) records the pre-change findings, not the current implementation state.
 

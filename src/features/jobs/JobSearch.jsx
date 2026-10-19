@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { normalizeProfile } from "./lib/jobs.js";
-import { requestAI } from "./lib/ai.js";
-import JobExplorer from "./components/JobExplorer.jsx";
-import { readStored, readActivity, readJobProfile } from "./lib/storage.js";
-import { extractPdfText, extractDocxText } from "./lib/parseDocument.js";
+import { normalizeProfile } from "./jobs.js";
+import { requestAI } from "../../shared/lib/ai.js";
+import JobExplorer from "./JobExplorer.jsx";
+import { readStored, readActivity, readJobProfile } from "../../shared/lib/storage.js";
+import { extractPdfText, extractDocxText } from "../resume/parseDocument.js";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 // All sensitive keys (Groq, JSearch) live server-side in /api/*.js

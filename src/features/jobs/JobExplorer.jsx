@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { normalizeJob } from '../lib/jobs.js';
-import { authHeaders } from '../lib/ai.js';
-import Icon from './Icon.jsx';
+import { normalizeJob } from './jobs.js';
+import { authHeaders } from '../../shared/lib/ai.js';
+import Icon from '../../shared/components/Icon.jsx';
 
 const locations = ['All locations', 'Nigeria', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'Netherlands', 'UAE', 'South Africa', 'Remote'];
 

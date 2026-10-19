@@ -1,3 +1,5 @@
+import { normalizeIntake } from './intake.js';
+
 export const SECTIONS = [
   { id: 'summary', label: 'Professional summary', hint: 'A short introduction in your own words.' },
   { id: 'experience', label: 'Work experience', hint: 'Paid work, internships, or freelance work.' },
@@ -11,7 +13,7 @@ export const SECTIONS = [
 
 export function emptyResume() {
   return {
-    version: 1, name: '', title: '', email: '', phone: '', location: '', website: '',
+    version: 1, intake: null, name: '', title: '', email: '', phone: '', location: '', website: '',
     summary: '', skills: '', certifications: '', languages: '',
     sections: ['summary', 'experience', 'education', 'projects', 'skills'],
     experience: [], education: [], projects: [], volunteering: [],
@@ -30,6 +32,7 @@ export function normalizeResume(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return base;
   for (const key of ['name', 'title', 'email', 'phone', 'location', 'website', 'summary', 'skills', 'certifications', 'languages']) base[key] = text(value[key]);
   base.sections = Array.isArray(value.sections) ? SECTIONS.map(s => s.id).filter(id => value.sections.includes(id)) : base.sections;
+  base.intake = normalizeIntake(value.intake);
   base.experience = rows(value.experience, ['role', 'company', 'dates', 'bullets']);
   base.education = rows(value.education, ['degree', 'institution', 'dates']);
   base.projects = rows(value.projects, ['name', 'link', 'bullets']);
