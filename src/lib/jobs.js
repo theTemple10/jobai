@@ -2,7 +2,7 @@ export function normalizeProfile(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The analysis returned an invalid profile. Please try again.');
   const strings = key => Array.isArray(value[key]) ? value[key].filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()) : [];
   const text = key => typeof value[key] === 'string' && value[key] !== 'null' ? value[key].trim() : '';
-  const profile = Object.fromEntries(['name', 'email', 'phone', 'location', 'title', 'summary', 'seniority'].map(key => [key, text(key)]));
+  const profile = Object.fromEntries(['name', 'email', 'phone', 'location', 'website', 'title', 'summary', 'seniority'].map(key => [key, text(key)]));
   for (const key of ['skills', 'languages', 'certifications', 'jobTitles', 'industries', 'keyStrengths']) profile[key] = strings(key);
   profile.experience = Array.isArray(value.experience) ? value.experience.filter(e => e && typeof e === 'object').map(e => ({
     role: typeof e.role === 'string' ? e.role : '', company: typeof e.company === 'string' ? e.company : '',
@@ -11,6 +11,8 @@ export function normalizeProfile(value) {
   profile.education = Array.isArray(value.education) ? value.education.filter(e => e && typeof e === 'object').map(e => ({
     degree: typeof e.degree === 'string' ? e.degree : '', institution: typeof e.institution === 'string' ? e.institution : '', year: typeof e.year === 'string' ? e.year : '',
   })) : [];
+  profile.projects = Array.isArray(value.projects) ? value.projects.filter(e => e && typeof e === 'object').map(e => ({name: typeof e.name === 'string' ? e.name : '', link: typeof e.link === 'string' ? e.link : '', highlights: Array.isArray(e.highlights) ? e.highlights.filter(h => typeof h === 'string') : []})) : [];
+  profile.volunteering = Array.isArray(value.volunteering) ? value.volunteering.filter(e => e && typeof e === 'object').map(e => ({role: typeof e.role === 'string' ? e.role : '', company: typeof e.company === 'string' ? e.company : '', duration: typeof e.duration === 'string' ? e.duration : '', highlights: Array.isArray(e.highlights) ? e.highlights.filter(h => typeof h === 'string') : []})) : [];
   if (!profile.title && !profile.name && !profile.skills.length) throw new Error('We could not identify a usable profile. Try another document or build your CV manually.');
   if (!profile.jobTitles.length && profile.title) profile.jobTitles = [profile.title];
   return profile;

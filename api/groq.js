@@ -8,6 +8,7 @@ const SYSTEMS = {
 
 export function buildRequest(body) {
   if (!body || !Object.hasOwn(SYSTEMS, body.operation)) throw new HttpError(400, 'Choose a supported writing operation.');
+  if (body.useVision !== undefined && typeof body.useVision !== 'boolean') throw new HttpError(400, 'Please provide a valid image-analysis choice.');
   if (body.useVision && body.operation !== 'parse') throw new HttpError(400, 'Vision is supported only for CV analysis.');
   if (body.operation !== 'rewrite' && (!Array.isArray(body.messages) || body.messages.length > 3)) throw new HttpError(400, 'Please provide valid document messages.');
   const content = body.operation === 'rewrite' ? body.text : body.messages.findLast(message => message && message.role === 'user')?.content;
@@ -15,6 +16,7 @@ export function buildRequest(body) {
     if (!content.trim() || content.length > 80000 || (body.operation === 'rewrite' && content.length > 12000)) throw new HttpError(400, 'Please provide a shorter, non-empty text.');
   } else if (Array.isArray(content) && body.operation === 'parse' && body.useVision) {
     if (!content.length || content.length > 3 || content.some(part => {
+      if (!part || typeof part !== 'object') return true;
       if (part.type === 'text') return typeof part.text !== 'string' || part.text.length > 80000;
       return part.type !== 'image_url' || typeof part.image_url?.url !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(part.image_url.url) || part.image_url.url.length > 4200000;
     })) throw new HttpError(400, 'Please use a supported image smaller than 3MB.');

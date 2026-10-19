@@ -30,3 +30,18 @@ test('daily encouragement is stable throughout a local calendar day', () => {
   assert.equal(dailyEncouragement(new Date(2026,9,9,1)), dailyEncouragement(new Date(2026,9,9,23)));
   assert.notEqual(dailyEncouragement(new Date(2026,9,9)),dailyEncouragement(new Date(2026,9,10)));
 });
+
+test('editing normalization preserves in-progress spaces and line breaks', () => {
+  const r = normalizeResume({...emptyResume(), name:'Ada ', summary:'I build tools.\n', experience:[{role:'Frontend ',company:'',dates:'',bullets:'First achievement\n'}]});
+  assert.equal(r.name,'Ada ');assert.equal(r.summary,'I build tools.\n');assert.equal(r.experience[0].role,'Frontend ');assert.equal(r.experience[0].bullets,'First achievement\n');
+  assert.equal(resumeBlocks(r).find(block=>block.type==='name').text,'Ada');
+  assert.deepEqual(resumeBlocks({...emptyResume(),name:'  ',experience:[{role:'  '}]}),[]);
+});
+
+test('imported supporting facts are included and survive application preparation', () => {
+  const r = resumeFromProfile({name:'Ada',title:'Developer',website:'https://example.com',projects:[{name:'Community tool',link:'https://example.com/tool',highlights:['Built accessible search']}],volunteering:[{role:'Mentor',company:'Local group',duration:'2025',highlights:['Taught HTML']}],languages:['Yoruba'],certifications:['Course certificate']});
+  for(const section of ['projects','volunteering','languages','certifications']) assert.ok(r.sections.includes(section));
+  const p=profileFromResume(r);
+  assert.equal(p.projects[0].highlights[0],'Built accessible search');assert.equal(p.volunteering[0].duration,'2025');assert.deepEqual(p.languages,['Yoruba']);assert.deepEqual(p.certifications,['Course certificate']);assert.equal(p.website,'https://example.com');
+  assert.match(resumeBlocks(r).map(block=>block.text).join('\n'),/Yoruba/);
+});
