@@ -86,3 +86,92 @@ test('job provider failure is a persistent error without fictional listings',asy
   await page.goto('/#/jobs');await expect(page.getByRole('alert')).toContainText('The job provider is unavailable');
   await expect(page.getByText('TechCorp')).toHaveCount(0);await expect(page.getByText('GlobalBank')).toHaveCount(0);
 });
+
+test('normal keyboard entry preserves words, paragraphs, and achievements',async({page})=>{
+  await page.goto('/builder');
+  await page.getByLabel('Full name',{exact:true}).pressSequentially('Ada Obi');
+  await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Ada Obi');
+  await page.getByRole('button',{name:'Professional summary',exact:true}).click();
+  const summary=page.getByLabel('A short introduction');
+  await summary.pressSequentially('I build tools.');await summary.press('Enter');await summary.pressSequentially('For people.');
+  await expect(summary).toHaveValue('I build tools.\nFor people.');
+  await page.getByRole('button',{name:'Projects',exact:true}).click();await page.getByRole('button',{name:'+ Add project'}).click();
+  const achievements=page.getByLabel('What did you build or contribute?');
+  await achievements.pressSequentially('Built a tool');await achievements.press('Enter');await achievements.pressSequentially('Made it accessible');
+  await expect(achievements).toHaveValue('Built a tool\nMade it accessible');
+});
+
+test('skip navigation retains the active tool and focuses its content',async({page})=>{
+  await page.goto('/builder');await page.getByRole('link',{name:'Skip to content'}).focus();await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/builder$/);await expect(page.locator('main')).toBeFocused();
+  await page.getByRole('link',{name:'Find jobs',exact:true}).click();await expect(page).toHaveURL(/\/jobs$/);
+  await page.goBack();await expect(page.getByRole('heading',{level:1})).toHaveText('Let’s tell your story.');
+});
+
+test('unexpected saved activity cannot blank job search',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.addInitScript(()=>{localStorage.setItem('jobai_applications','{}');localStorage.setItem('jobai_step','3');});
+  await page.goto('/jobs');await expect(page.getByRole('heading',{level:1})).toHaveText('Find your next possibility.');
+  await expect(page.getByText('A new search starts here.')).toBeVisible();expect(errors).toEqual([]);
+});
+
+test('automatic device saving is explicit and preserves later edits',async({page})=>{
+  await page.goto('/builder');await page.getByLabel('Full name',{exact:true}).fill('Ada Obi');
+  expect(await page.evaluate(()=>localStorage.getItem('jobai_resume_draft'))).toBeNull();
+  await page.getByLabel('Keep this draft updated on this device.').check();
+  await expect(page.getByText(/Saved on this device at/)).toBeVisible();
+  await page.getByLabel('Full name',{exact:true}).fill('Ada Obi Updated');
+  await expect.poll(async()=>page.evaluate(()=>JSON.parse(localStorage.getItem('jobai_resume_draft')).name)).toBe('Ada Obi Updated');
+  await page.reload();await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Ada Obi Updated');
+  await page.getByRole('button',{name:'Delete device draft'}).click();
+  expect(await page.evaluate(()=>localStorage.getItem('jobai_resume_draft'))).toBeNull();
+  await expect(page.getByLabel('Keep this draft updated on this device.')).not.toBeChecked();
+});
+
+test('first visit offers search without a CV and submits one bounded query',async({page})=>{
+  const requests=[];await page.route('**/api/jobs?**',route=>{requests.push(route.request().url());return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})});});
+  await page.goto('/jobs');await expect(page.getByLabel('Job title, skill, or company')).toBeVisible();expect(requests).toHaveLength(0);
+  await page.getByLabel('Job title, skill, or company').fill('Frontend developer');await page.getByLabel('Job search location').selectOption('Remote');await page.getByRole('button',{name:'Find jobs',exact:true}).click();
+  await expect(page.getByText('No listings came back this time.')).toBeVisible();expect(requests).toHaveLength(1);expect(requests[0]).toContain('remote_jobs_only=true');
+});
+
+test('restored cover letters retain preparation actions and project evidence',async({page})=>{
+  await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({name:'Ada',title:'Developer',skills:['Python'],jobTitles:['Developer'],projects:[{name:'Community tool',highlights:['Built accessible search']}]}));localStorage.setItem('jobai_letter_role-1',JSON.stringify('Dear Hiring Manager, I build Python tools.'));});
+  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Developer',employer_name:'Community Labs',job_description:'Python development'}]})}));
+  await page.route('**/api/groq',route=>{const payload=route.request().postDataJSON();expect(payload.messages[0].content).toContain('Built accessible search');return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:'A reviewed letter.'}}]})});});
+  await page.goto('/jobs');await page.getByRole('button',{name:'View Developer at Community Labs'}).click();
+  await expect(page.getByRole('button',{name:'Open listing & copy letter',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Regenerate',exact:false}).click();await page.getByLabel('Editable cover letter').waitFor();
+  await expect(page.getByLabel('Editable cover letter')).toHaveValue('A reviewed letter.');
+});
+
+test('returning visitors can deliberately import a different CV',async({page})=>{
+  await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({title:'Developer',skills:[]}));});
+  await page.goto('/');await page.getByRole('button',{name:'I already have a CV'}).click();
+  await expect(page.getByRole('button',{name:'Choose a CV file'})).toBeVisible();
+});
+
+test('job cards and detail actions fit narrow screens in both themes',async({page})=>{
+  await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({title:'Developer',skills:['Python']}));});
+  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Senior Frontend Developer, Accessibility and Design Systems',employer_name:'Community Labs International',job_description:'Build accessible Python tools.\nReview real requirements.',job_city:'Lagos',job_country:'Nigeria',job_is_remote:true}]})}));
+  for(const width of [320,375,768,1440]) {
+    await page.setViewportSize({width,height:950});await page.goto('/jobs');await expect(page.getByRole('button',{name:/View Senior Frontend Developer/})).toBeVisible();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.getByRole('button',{name:/View Senior Frontend Developer/}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    const title = await page.getByRole('heading',{name:'Senior Frontend Developer, Accessibility and Design Systems',exact:true}).boundingBox();expect(title.width).toBeGreaterThan(150);
+  }
+});
+
+test('empty documents cannot be exported and mobile preview is easy to reach',async({page})=>{
+  await page.setViewportSize({width:375,height:900});await page.goto('/builder');
+  await page.getByRole('button',{name:'Review & download'}).click();await page.getByLabel('I have reviewed this CV').check();await expect(page.getByRole('button',{name:'Download PDF'})).toBeDisabled();
+  await page.getByRole('button',{name:'Contact & target role'}).click();await page.getByLabel('Full name',{exact:true}).fill('Ada Obi');
+  await page.getByRole('button',{name:'Preview my CV',exact:true}).click();await expect(page.getByRole('heading',{name:'Ada Obi',exact:true})).toBeVisible();
+  await expect(page.getByLabel('CV editor')).toBeHidden();await page.getByRole('button',{name:'Edit my CV',exact:true}).click();await expect(page.getByLabel('Full name',{exact:true})).toBeVisible();
+});
+
+test('sign-in recovery copies restore only in their short recovery window',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('jobai_auth_handoff',JSON.stringify({document:{name:'Recovery candidate',title:'Developer'},cloudId:null,at:Date.now()})));
+  await page.goto('/builder');await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Recovery candidate');
+  expect(await page.evaluate(()=>localStorage.getItem('jobai_auth_handoff'))).toBeNull();
+});

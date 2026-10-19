@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { SECTIONS, normalizeResume, resumeBlocks, reviewResume } from '../lib/resume.js';
 import { exportDocx, exportPdf, exportText } from '../lib/exportResume.js';
 import { saveCloudResume, supabase } from '../lib/supabase.js';
@@ -15,9 +15,13 @@ function Field({label, value, onChange, multiline, ...props}) {
   return <label className="field">{label}{multiline ? <textarea rows={4} value={value} onChange={e => onChange(e.target.value)} {...props} /> : <input value={value} onChange={e => onChange(e.target.value)} {...props} />}</label>;
 }
 
-export default function ResumeBuilder({ resume: initial, onChange, user, cloudId, onCloudSaved, onImport, onFindJobs, navigate }) {
+export default function ResumeBuilder({ resume: initial, onChange, user, cloudId, onCloudSaved, onImport, onFindJobs, navigate, onNew, dirty, autoSave, onAutoSave, savedAt, onDeviceSaved }) {
   const r = normalizeResume(initial);
   const [active, setActive] = useState('details');
+  const [view, setView] = useState('edit');
+  const editorRef = useRef(null);
+  const steps = ['details', ...r.sections, 'review'];
+  function selectSection(next) {setActive(next); setView('edit'); if (window.matchMedia('(max-width: 640px)').matches) requestAnimationFrame(() => editorRef.current?.scrollIntoView({block:'start',behavior:'smooth'}));}
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -36,12 +40,12 @@ export default function ResumeBuilder({ resume: initial, onChange, user, cloudId
   }
 
   function saveDevice() {
-    run('local', async () => {localStorage.setItem('jobai_resume_draft', JSON.stringify(r)); setNotice('Draft saved on this device. On a shared device, delete it when you finish.');});
+    run('local', async () => {localStorage.setItem('jobai_resume_draft', JSON.stringify(r)); onDeviceSaved(); setNotice('Draft saved on this device. On a shared device, delete it when you finish.');});
   }
 
-  async function saveAccount() {
+  async function saveAccount(asNew = false) {
     if (!user) {navigate('account'); return;}
-    await run('cloud', async () => {const saved = await saveCloudResume(user.id, r, cloudId); onCloudSaved(saved.id); setNotice('Your CV is saved to your account.');});
+    await run('cloud', async () => {const saved = await saveCloudResume(user.id, r, asNew ? null : cloudId); onCloudSaved(saved.id); setNotice(asNew ? 'A separate CV version was saved to your account.' : 'Your CV is saved to your account.');});
   }
 
   async function improveSummary() {
@@ -53,24 +57,24 @@ export default function ResumeBuilder({ resume: initial, onChange, user, cloudId
   }
 
   function removeDevice() {
-    run('delete-local', async () => {localStorage.removeItem('jobai_resume_draft'); setNotice('The saved device draft was deleted. Your current editing session remains open.');});
+    run('delete-local', async () => {localStorage.removeItem('jobai_resume_draft'); onAutoSave(false); onDeviceSaved(true); setNotice('The saved device draft was deleted. Your current editing session remains open.');});
   }
 
-  return <main id="main-content" className="builder-page container">
-    <header className="builder-heading"><div><span className="eyebrow">YOUR EXPERIENCE. A LITTLE MORE STRUCTURE.</span><h1>Let’s tell your story.</h1><p>Start with a few details. Choose what fits, and leave out what doesn’t.</p></div><button className="button secondary" onClick={onImport}>Import an existing CV ↗</button></header>
+  return <main id="main-content" className={`builder-page container builder-mode-${view}`}>
+    <header className="builder-heading"><div><span className="eyebrow">YOUR EXPERIENCE. A LITTLE MORE STRUCTURE.</span><h1>Let’s tell your story.</h1><p>Start with a few details. Choose what fits, and leave out what doesn’t.</p></div><div className="button-row"><button className="text-link" onClick={onNew}>New CV</button><button className="button secondary" onClick={onImport}>Import an existing CV ↗</button></div></header>
     <div className="builder-notices" aria-live="polite">{notice && <p className="notice">{notice}</p>}{error && <p className="notice error" role="alert">{error}</p>}</div>
-    <div className="builder-layout">
-      <aside className="builder-sidebar"><span className="eyebrow">YOUR SECTIONS</span><button className={`section-tab ${active === 'details' ? 'selected' : ''}`} onClick={() => setActive('details')}>Contact & target role <span>→</span></button>
-        {SECTIONS.map(section => <div className="section-option" key={section.id}><input id={`include-${section.id}`} type="checkbox" checked={r.sections.includes(section.id)} onChange={e => {update('sections', e.target.checked ? [...r.sections, section.id] : r.sections.filter(id => id !== section.id)); if (!e.target.checked && active === section.id) setActive('details');}} /><label className="sr-only" htmlFor={`include-${section.id}`}>Include {section.label}</label><button className={`section-tab ${active === section.id ? 'selected' : ''}`} disabled={!r.sections.includes(section.id)} onClick={() => setActive(section.id)}>{section.label}</button></div>)}
+    <div className="builder-view-switch" aria-label="Builder view"><button aria-pressed={view === 'edit'} onClick={() => setView('edit')}>Edit my CV</button><button aria-pressed={view === 'preview'} onClick={() => setView('preview')}>Preview my CV</button></div><div className="builder-layout">
+      <aside className="builder-sidebar"><span className="eyebrow">YOUR SECTIONS</span><button className={`section-tab ${active === 'details' ? 'selected' : ''}`} onClick={() => selectSection('details')}>Contact & target role <span>→</span></button>
+        {SECTIONS.map(section => <div className="section-option" key={section.id}><input id={`include-${section.id}`} type="checkbox" checked={r.sections.includes(section.id)} onChange={e => {update('sections', e.target.checked ? [...r.sections, section.id] : r.sections.filter(id => id !== section.id)); if (!e.target.checked && active === section.id) setActive('details');}} /><label className="sr-only" htmlFor={`include-${section.id}`}>Include {section.label}</label><button className={`section-tab ${active === section.id ? 'selected' : ''}`} disabled={!r.sections.includes(section.id)} onClick={() => selectSection(section.id)}>{section.label}</button></div>)}
         <p className="form-help">No work experience yet? Projects, education, and volunteering can be a good starting point.</p>
-        <button className={`section-tab ${active === 'review' ? 'selected' : ''}`} onClick={() => setActive('review')}>Review & download <span>↗</span></button>
+        <button className={`section-tab ${active === 'review' ? 'selected' : ''}`} onClick={() => selectSection('review')}>Review & download <span>↗</span></button>
       </aside>
 
-      <section className="builder-editor" aria-label="CV editor">
+      <section ref={editorRef} className="builder-editor" aria-label="CV editor">
         {active === 'details' ? <><span className="eyebrow">LET’S START WITH YOU</span><h2>The essentials</h2><p className="form-help">Use contact details you’re happy to share with an employer. A city and country are enough; you don’t need a full street address.</p><div className="field-grid"><Field label="Full name" value={r.name} onChange={v => update('name', v)} autoComplete="name" /><Field label="Target role" value={r.title} onChange={v => update('title', v)} placeholder="e.g. Junior Frontend Developer" /><Field label="Email" type="email" value={r.email} onChange={v => update('email', v)} autoComplete="email" /><Field label="Phone (optional)" type="tel" value={r.phone} onChange={v => update('phone', v)} autoComplete="tel" /><Field label="City, country (optional)" value={r.location} onChange={v => update('location', v)} /><Field label="Portfolio or LinkedIn URL (optional)" value={r.website} onChange={v => update('website', v)} /></div></> : active === 'review' ? <>
           <span className="eyebrow">A LAST LOOK BEFORE YOU SHARE</span><h2>Clear, truthful, ready for review.</h2><p className="form-help">These are completeness checks, not an ATS score. Your document uses one column, standard headings, and selectable text.</p><ul className="review-checks">{checks.map(check => <li key={check.label} className={check.passed ? 'passed' : ''}><span aria-hidden="true">{check.passed ? '✓' : '○'}</span>{check.label}</li>)}</ul>
           <label className="consent"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />I have reviewed this CV and confirm that its facts and achievements are mine.</label>
-          <div className="export-actions"><button className="button primary" disabled={!reviewed || Boolean(busy)} onClick={() => run('pdf', () => exportPdf(r))}>{busy === 'pdf' ? 'Preparing…' : 'Download PDF ↓'}</button><button className="button secondary" disabled={!reviewed || Boolean(busy)} onClick={() => run('docx', () => exportDocx(r))}>Download Word ↓</button><button className="text-link" disabled={!reviewed} onClick={() => exportText(r)}>Plain text ↓</button></div>
+          <div className="export-actions"><button className="button primary" disabled={!reviewed || !blocks.length || Boolean(busy)} onClick={() => run('pdf', () => exportPdf(r))}>{busy === 'pdf' ? 'Preparing…' : 'Download PDF ↓'}</button><button className="button secondary" disabled={!reviewed || !blocks.length || Boolean(busy)} onClick={() => run('docx', () => exportDocx(r))}>Download Word ↓</button><button className="text-link" disabled={!reviewed || !blocks.length} onClick={() => exportText(r)}>Plain text ↓</button></div>
           <p className="form-help">Use the format requested by the employer. For names or languages outside the PDF font’s character set, use the Word export and check the saved document.</p>
           <button className="button secondary" disabled={!r.title} onClick={() => onFindJobs(r)}>Explore jobs for this profile →</button>
         </> : <>
@@ -80,7 +84,7 @@ export default function ResumeBuilder({ resume: initial, onChange, user, cloudId
             {active === 'summary' && <div className="writing-assist"><h3>A second pair of eyes</h3><p className="form-help">Ask AI to suggest clearer wording for the summary you wrote. Only this text is sent to our AI provider. Review the suggestion; it can make mistakes.</p><label className="consent"><input type="checkbox" checked={aiConsent} onChange={e => setAiConsent(e.target.checked)} />Send my summary for a wording suggestion.</label><button className="button secondary" disabled={Boolean(busy) || !r.summary.trim() || !aiConsent} onClick={improveSummary}>{busy === 'writing' ? 'Thinking about your words…' : 'Suggest clearer wording ✧'}</button>{suggestion && <div className="suggestion"><p>{suggestion}</p><div className="button-row"><button className="button primary" onClick={() => {update('summary', suggestion); setSuggestion(null);}}>Use this wording</button><button className="text-link" onClick={() => setSuggestion(null)}>Keep my original</button></div></div>}</div>}
           </>}
         </>}
-        <div className="editor-save"><button className="button secondary" disabled={Boolean(busy)} onClick={saveDevice}>Save on this device</button>{supabase && <button className="button secondary" disabled={Boolean(busy)} onClick={saveAccount}>{busy === 'cloud' ? 'Saving…' : user ? 'Save to my account' : 'Sign in to save'}</button>}<button className="text-link" onClick={removeDevice}>Delete device draft</button><p className="form-help">Drafts stay in this tab until you choose to save. Downloads work without an account.</p></div>
+        <div className="builder-step-actions">{steps.indexOf(active) > 0 && <button className="button secondary" onClick={() => selectSection(steps[steps.indexOf(active) - 1])}>← Previous section</button>}{active !== 'review' && <button className="button primary" onClick={() => selectSection(steps[steps.indexOf(active) + 1])}>{steps[steps.indexOf(active) + 1] === 'review' ? 'Review my CV →' : 'Next section →'}</button>}</div><div className="editor-save"><p className="draft-state" role="status">{dirty ? autoSave ? 'Saving on this device…' : 'Changes in this tab · not saved yet' : savedAt ? `Saved on this device at ${savedAt}` : 'Your editing session is ready'}</p><label className="consent"><input type="checkbox" checked={autoSave} onChange={event => onAutoSave(event.target.checked)} />Keep this draft updated on this device. Use only on a device you trust.</label><button className="button secondary" disabled={Boolean(busy)} onClick={saveDevice}>Save on this device</button>{supabase && <button className="button secondary" disabled={Boolean(busy)} onClick={() => saveAccount()}>{busy === 'cloud' ? 'Saving…' : user ? 'Save to my account' : 'Sign in to save'}</button>}{user && cloudId && <button className="text-link" disabled={Boolean(busy)} onClick={() => saveAccount(true)}>Save as a new CV version</button>}<button className="text-link" onClick={removeDevice}>Delete device draft</button><p className="form-help">Device saving is optional. Unsaved edits stay in this tab. Downloads work without an account.</p></div>
       </section>
 
       <aside className="preview-panel" aria-label="CV preview"><div className="preview-label"><span className="eyebrow">LIVE PREVIEW</span><span>Single column · A4 exports</span></div><div className="resume-paper">{blocks.length ? blocks.map((block, i) => {
