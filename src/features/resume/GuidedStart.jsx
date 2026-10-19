@@ -23,7 +23,14 @@ export default function GuidedStart({resume,onChange,onAccept,onManual,onImport,
   const skills=resume.skills.split(',').map(skill=>skill.trim()).filter(Boolean);
 
   useEffect(()=>()=>controllerRef.current?.abort(),[]);
-  useEffect(()=>{headingRef.current?.focus({preventScroll:true});},[index,candidate]);
+  useEffect(()=>{
+    const heading=headingRef.current;
+    heading?.focus({preventScroll:true});
+    if (!heading || (!index && !candidate)) return;
+    const top=heading.getBoundingClientRect().top;
+    const headerBottom=document.querySelector('.product-header')?.getBoundingClientRect().bottom || 0;
+    if (top<headerBottom+12 || top>window.innerHeight-100) heading.scrollIntoView({block:'start',behavior:'instant'});
+  },[index,candidate]);
 
   function change(patch,guidePatch={}) {
     controllerRef.current?.abort();setBusy(false);setError('');setCandidate(null);

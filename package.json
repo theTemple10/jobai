@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
     "test:browser": "playwright test",
-    "test:seo": "node scripts/verify-public-pages.mjs"
+    "test:seo": "node scripts/verify-public-pages.mjs",
+    "check:config": "node scripts/check-config.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",

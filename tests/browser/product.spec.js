@@ -245,6 +245,9 @@ test('guided choices and draft review fit small screens in both themes',async({p
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.getByRole('button',{name:'Arrange my notes →',exact:true}).click();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    const heading=page.getByRole('heading',{name:'Does this sound like you?'});
+    const bounds=await heading.boundingBox();const header=await page.locator('.product-header').boundingBox();
+    expect(bounds.y).toBeGreaterThanOrEqual(header.y+header.height);expect(bounds.y+bounds.height).toBeLessThan(850);
     await page.screenshot({path:`/tmp/roleaide-guided-${theme}-mobile.png`,fullPage:true});
   }
 });
