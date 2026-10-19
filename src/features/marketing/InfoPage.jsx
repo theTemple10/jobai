@@ -1,4 +1,4 @@
-import { BRAND } from '../lib/brand.js';
+import { BRAND } from '../../shared/lib/brand.js';
 
 export default function InfoPage({page}) {
   const privacy = page === 'privacy';

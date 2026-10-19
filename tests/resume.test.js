@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyResume, normalizeResume, resumeBlocks, profileFromResume, resumeFromProfile, reviewResume } from '../src/lib/resume.js';
-import { dailyEncouragement } from '../src/lib/quotes.js';
+import { emptyResume, normalizeResume, resumeBlocks, profileFromResume, resumeFromProfile, reviewResume } from '../src/features/resume/resume.js';
+import { dailyEncouragement } from '../src/features/marketing/quotes.js';
 
 test('exports include only chosen sections, preserving candidate facts', () => {
   const resume = {...emptyResume(), name: 'Ada Obi', title: 'Developer', skills: 'Python, SQL', sections: ['projects'], experience: [{role: 'Hidden role', company: 'Acme', bullets: 'Hidden achievement'}], projects: [{name: 'Community directory', link: '', bullets: 'Built search for local volunteers\nImproved keyboard navigation'}]};

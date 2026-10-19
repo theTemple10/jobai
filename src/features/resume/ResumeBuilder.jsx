@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
-import { SECTIONS, normalizeResume, resumeBlocks, reviewResume } from '../lib/resume.js';
-import { exportDocx, exportPdf, exportText } from '../lib/exportResume.js';
-import { saveCloudResume, supabase } from '../lib/supabase.js';
-import { requestAI } from '../lib/ai.js';
+import { SECTIONS, normalizeResume, resumeBlocks, reviewResume } from './resume.js';
+import { exportDocx, exportPdf, exportText } from './exportResume.js';
+import { saveCloudResume, supabase } from '../account/supabase.js';
+import { requestAI } from '../../shared/lib/ai.js';
 
 const GROUPS = {
   experience: {name: 'position', fields: [['role', 'Job title'], ['company', 'Company or organisation'], ['dates', 'Dates (e.g. Jan 2024 – Present)'], ['bullets', 'What did you do? One achievement per line.']]},

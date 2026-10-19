@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeJob, normalizeProfile } from '../src/lib/jobs.js';
+import { normalizeJob, normalizeProfile } from '../src/features/jobs/jobs.js';
 
 test('zero skill overlap gives zero coverage; identical input is deterministic', () => {
   const row = {job_title:'Accountant',job_description:'Bookkeeping',job_min_salary:20,job_max_salary:30,job_salary_period:'HOUR',job_salary_currency:'USD'};

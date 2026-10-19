@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@config "../tailwind.config.js";
+@config "../../../tailwind.config.js";
 
 /*
   Theme tokens — light is the default (:root), dark is opt-in via the

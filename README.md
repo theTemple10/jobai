@@ -54,18 +54,18 @@ Regression tests cover document section exclusion, profile validation, determini
 ## Architecture
 
 ```text
-src/ProductApp.jsx        Landing, builder, workspace navigation and sign-in state
-src/components/          LandingPage, ResumeBuilder, AccountPanel
-src/lib/resume.js         Shared factual document model and completeness guidance
-src/lib/exportResume.js   PDF, Word, and plain-text exports
-src/lib/parseDocument.js  PDF and DOCX text extraction
-src/lib/jobs.js           Deterministic job normalization and profile validation
-src/lib/supabase.js       Public client and account CV queries (RLS protected)
-src/JobSearch.jsx         Job discovery, cover letters, local activity
+src/app/                 App shell and navigation
+src/features/resume/     Guided intake, editor, document model, parsing and exports
+src/features/jobs/       Discovery, application preparation and activity
+src/features/account/    Sign-in, workspace and Supabase queries
+src/features/marketing/  Landing, public information and encouragement
+src/shared/              Shared components, services, brand and styles
 api/                     Vercel provider endpoints
-server/protection.js     Verified account identity and shared hourly quotas
+server/                  Identity, quotas and provider operations
 supabase/migrations/     CV ownership policies and atomic usage counters
 ```
+
+See [source organization](docs/ARCHITECTURE.md) for the boundaries and entry points.
 
 Exports use open-licensed Noto Sans for PDF and standard Word paragraphs. Font licensing is included under `public/fonts/OFL.txt`. Document parsers and export tools load separately from the initial landing-page bundle.
 

@@ -1,5 +1,5 @@
 import { emptyResume, normalizeResume, resumeBlocks } from './resume.js';
-import { readStored } from './storage.js';
+import { readStored } from '../../shared/lib/storage.js';
 const HANDOFF = 'jobai_auth_handoff';
 export function readHandoff() {
   const value = readStored(HANDOFF, null, value => value && typeof value === 'object' && Date.now() - value.at < 30 * 60 * 1000 && value.at <= Date.now());

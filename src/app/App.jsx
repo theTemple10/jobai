@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import InfoPage from './components/InfoPage.jsx';
-import LandingPage from './components/LandingPage.jsx';
-import ResumeBuilder from './components/ResumeBuilder.jsx';
-import AccountPanel from './components/AccountPanel.jsx';
-import JobSearch from './JobSearch.jsx';
-import { emptyResume, normalizeResume, resumeFromProfile, profileFromResume } from './lib/resume.js';
-import { supabase } from './lib/supabase.js';
-import { ROUTES, routeFromLocation, navigateTo } from './lib/navigation.js';
-import { initialDraft, hasDraft, readHandoff, clearHandoff, prepareAuthHandoff } from './lib/drafts.js';
-import { readStored } from './lib/storage.js';
-import { ProductHeader, ProductFooter } from './components/PublicLayout.jsx';
-import { BRAND } from './lib/brand.js';
-import './product.css';
+import InfoPage from '../features/marketing/InfoPage.jsx';
+import LandingPage from '../features/marketing/LandingPage.jsx';
+import ResumeBuilder from '../features/resume/ResumeBuilder.jsx';
+import AccountPanel from '../features/account/AccountPanel.jsx';
+import JobSearch from '../features/jobs/JobSearch.jsx';
+import { emptyResume, normalizeResume, resumeFromProfile, profileFromResume } from '../features/resume/resume.js';
+import { supabase } from '../features/account/supabase.js';
+import { ROUTES, routeFromLocation, navigateTo } from './navigation.js';
+import { initialDraft, hasDraft, readHandoff, clearHandoff, prepareAuthHandoff } from '../features/resume/drafts.js';
+import { readStored } from '../shared/lib/storage.js';
+import { ProductHeader, ProductFooter } from '../shared/components/PublicLayout.jsx';
+import { BRAND } from '../shared/lib/brand.js';
+import '../shared/styles/product.css';
 
 export default function ProductApp() {
   const [route, setRoute] = useState(() => readHandoff() ? 'builder' : routeFromLocation());

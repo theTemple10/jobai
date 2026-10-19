@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase, listCloudResumes } from '../lib/supabase.js';
+import { supabase, listCloudResumes } from './supabase.js';
 
 export default function AccountPanel({ user, onOpenResume, navigate, hasDraft, onPrepareSignIn }) {
   const [email, setEmail] = useState('');

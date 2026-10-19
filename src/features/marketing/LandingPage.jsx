@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { BRAND } from '../lib/brand.js';
-import { dailyEncouragement } from '../lib/quotes.js';
+import { BRAND } from '../../shared/lib/brand.js';
+import { dailyEncouragement } from './quotes.js';
 
 function PaperCompanion() {
   return <div className="hero-art" aria-hidden="true">

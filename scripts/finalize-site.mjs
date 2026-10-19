@@ -9,9 +9,9 @@ if (!origin.startsWith('https://')) throw new Error('VITE_PUBLIC_SITE_URL must b
 const preview = env.VERCEL_ENV === 'preview';
 const server = await createServer({mode:'production',server:{middlewareMode:true, hmr:false, ws:false, watch:null},optimizeDeps:{noDiscovery:true,include:[]},appType:'custom'});
 try {
-  const {default:PublicLayout} = await server.ssrLoadModule('/src/components/PublicLayout.jsx');
-  const {default:LandingPage} = await server.ssrLoadModule('/src/components/LandingPage.jsx');
-  const {default:InfoPage} = await server.ssrLoadModule('/src/components/InfoPage.jsx');
+  const {default:PublicLayout} = await server.ssrLoadModule('/src/shared/components/PublicLayout.jsx');
+  const {default:LandingPage} = await server.ssrLoadModule('/src/features/marketing/LandingPage.jsx');
+  const {default:InfoPage} = await server.ssrLoadModule('/src/features/marketing/InfoPage.jsx');
   let template = await readFile('dist/index.html','utf8');
   template = template.replaceAll('https://jobai-orpin.vercel.app', origin);
   const publicPages = [
