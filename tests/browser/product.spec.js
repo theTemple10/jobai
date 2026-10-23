@@ -176,6 +176,33 @@ test('sign-in recovery copies restore only in their short recovery window',async
   expect(await page.evaluate(()=>localStorage.getItem('jobai_auth_handoff'))).toBeNull();
 });
 
+test('starting a new CV asks before discarding excluded section facts', async ({page}) => {
+  await page.goto('/builder?mode=editor');
+  await page.getByRole('button', {name:'Skills', exact:true}).click();
+  await page.getByLabel('Skills (separate with commas)').fill('Python, SQL');
+  await page.getByLabel('Include Skills', {exact:true}).uncheck();
+  const dialog = page.waitForEvent('dialog').then(dialog => dialog.dismiss());
+  await page.getByRole('button', {name:'New CV', exact:true}).click();
+  await dialog;
+  await page.getByLabel('Include Skills', {exact:true}).check();
+  await page.getByRole('button', {name:'Skills', exact:true}).click();
+  await expect(page.getByLabel('Skills (separate with commas)')).toHaveValue('Python, SQL');
+});
+
+test('a restored sign-in copy remains unsaved until explicitly saved', async ({page}) => {
+  await page.goto('/');
+  await page.evaluate(() => localStorage.setItem('jobai_auth_handoff', JSON.stringify({document:{name:'Recovery candidate',title:'Developer'},at:Date.now()})));
+  await page.goto('/builder?mode=editor');
+  await expect(page.getByLabel('Full name', {exact:true})).toHaveValue('Recovery candidate');
+  await expect(page.getByText('Changes in this tab · not saved yet', {exact:true})).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('jobai_auth_handoff'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('jobai_resume_draft'))).toBeNull();
+  await page.getByRole('button', {name:'Save on this device', exact:true}).click();
+  await expect(page.getByText(/Saved on this device at/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Full name', {exact:true})).toHaveValue('Recovery candidate');
+});
+
 async function reachGuidedDraft(page) {
   await page.goto('/builder');
   await page.getByRole('button',{name:'Frontend developer',exact:true}).click();

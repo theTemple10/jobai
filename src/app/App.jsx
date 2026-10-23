@@ -18,7 +18,7 @@ export default function ProductApp() {
   const [resume, setResume] = useState(initialDraft);
   const [user, setUser] = useState(null);
   const [cloudId, setCloudId] = useState(() => readHandoff()?.cloudId || null);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(() => Boolean(readHandoff()));
   const [editorVersion,setEditorVersion] = useState(0);
   const [autoSave, setAutoSave] = useState(() => readStored('jobai_autosave', false, value => typeof value === 'boolean'));
   const [savedAt, setSavedAt] = useState('');
