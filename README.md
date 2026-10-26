@@ -48,6 +48,7 @@ npm run lint
 npm test
 npm run build
 npm run test:browser
+npm run test:production
 ```
 
 Browser checks use locally installed Chrome. In CI, Playwright uses Chromium. Install it with `npx playwright install --with-deps chromium` and set `CI=true` when using that browser locally. PDF text checks require `pdftotext` (Poppler). CI installs it.

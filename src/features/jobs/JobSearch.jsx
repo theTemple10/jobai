@@ -4,6 +4,7 @@ import { requestAI } from "../../shared/lib/ai.js";
 import JobExplorer from "./JobExplorer.jsx";
 import { readStored, readActivity, readJobProfile } from "../../shared/lib/storage.js";
 import { extractPdfText, extractDocxText } from "../resume/parseDocument.js";
+import { isModuleLoadError, MODULE_LOAD_MESSAGE } from '../../shared/lib/moduleLoading.js';
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 // All sensitive keys (Groq, JSearch) live server-side in /api/*.js
@@ -350,7 +351,7 @@ Additional context: ${prompt || "None provided"}`;
         resultTimer = setTimeout(() => {if (active) onDone(parsed);}, 600);
       } catch (err) {
         if (!active) return;
-        showToast(err.message || "Analysis failed. Please try again.", "error");
+        showToast(isModuleLoadError(err) ? MODULE_LOAD_MESSAGE : err.message || "Analysis failed. Please try again.", "error");
         resultTimer = setTimeout(() => {if (active) onDone(null);}, 1000);
       }
     })();

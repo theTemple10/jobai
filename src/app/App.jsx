@@ -11,6 +11,7 @@ import { initialDraft, hasDraft, readHandoff, clearHandoff, prepareAuthHandoff }
 import { readStored } from '../shared/lib/storage.js';
 import { ProductHeader, ProductFooter } from '../shared/components/PublicLayout.jsx';
 import { BRAND } from '../shared/lib/brand.js';
+import { MODULE_LOAD_MESSAGE } from '../shared/lib/moduleLoading.js';
 import '../shared/styles/product.css';
 
 export default function ProductApp() {
@@ -25,8 +26,17 @@ export default function ProductApp() {
   const [importing, setImporting] = useState(false);
   const [theme, setTheme] = useState(() => {try {return JSON.parse(localStorage.getItem('jobai_theme')) || 'system';} catch {return 'system';}});
   const [sessionError, setSessionError] = useState('');
+  const [assetLoadFailed, setAssetLoadFailed] = useState(false);
   const accountIdRef = useRef(null);
   const handoffRef = useRef(readHandoff());
+
+  useEffect(() => {
+    // Keep the rejection available to the operation's error handler. Never
+    // reload automatically: an open CV may contain unsaved work.
+    const failed = () => setAssetLoadFailed(true);
+    window.addEventListener('vite:preloadError', failed);
+    return () => window.removeEventListener('vite:preloadError', failed);
+  }, []);
 
   useEffect(() => {
     clearHandoff();
@@ -116,6 +126,7 @@ export default function ProductApp() {
   return <div className="product-app" onClick={internalLink}>
     <a className="skip-link" href="#main-content" onClick={event => {event.preventDefault(); const main = document.getElementById('main-content'); main?.setAttribute('tabindex', '-1'); main?.focus();}}>Skip to content</a>
     <ProductHeader route={route} user={user} theme={theme} onThemeChange={() => setTheme(t => t === 'system' ? 'light' : t === 'light' ? 'dark' : 'system')} />
+    {assetLoadFailed && <div role="alert" className="notice error container"><p>{MODULE_LOAD_MESSAGE}</p><button className="button secondary" onClick={() => window.location.reload()}>Reload page</button></div>}
     {sessionError && <p role="alert" className="notice error container">{sessionError}</p>}
     {(route === 'privacy' || route === 'help') && <InfoPage page={route} />}
     {route === 'home' && <LandingPage navigate={navigate} onImport={startImport} />}
