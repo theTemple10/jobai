@@ -4,6 +4,12 @@ This is the current product list. Local verification, remote deployment and obse
 
 October 27 update: local public remote-job discovery, prominent email-link feedback and pasted CV intake are documented in `UX_ACCEPTANCE_2026-10-27.md`. These changes still need deployment. Production's account configuration gate returned 401 after the owner's fix; actual sign-in currently redirects to localhost according to the owner. Correct Supabase URL configuration/email templates and request a fresh link, then verify delivery and return to `/account`. Dictation remains an idea, not an implemented feature.
 
+## Current October 27 priority
+
+The owner restored the original product priority: upload CV → parse → review → retrieve related jobs → explain ranking. CV-builder expansion is paused. Local fixes include inline email-code sign-in/resume, homepage import continuing to job-profile review, editable target role/skills, authenticated extended search after sign-in, and transparent text-evidence scoring. See `PRODUCT_RESEARCH_2026-10-27.md`, `CORE_FLOW_ACCEPTANCE_2026-10-27.md` and `marketing/ROLEAIDE_DEMO_PLAN.md`.
+
+The owner reports correcting Auth URLs and successfully applying the workspace migration after a schema query showed both required objects absent. Anonymous CV access now returns 401/42501 as expected. The earlier missing-schema blocker is superseded; actual delivery, authenticated storage/provider acceptance and deployed release remain pending.
+
 ## 1. PDF reader asset recovery and deployment
 
 The reported production URL `/assets/pdf-BE5t8-JP.js` returned **404**. The current homepage referenced `/assets/pdf-CBRN-wbG.js`, which returned **200**. This supports an old open page or cached entry referring to a removed deployment asset; it does not identify which browser/cache retained the old reference.

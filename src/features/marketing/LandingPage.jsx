@@ -28,10 +28,10 @@ export default function LandingPage({ navigate, onImport }) {
     <section className="landing-hero container">
       <div className="hero-copy">
         <h1>You have a story.<br />Let’s help it<br /><em>open doors.</em></h1>
-        <p className="hero-intro">The job search can feel like a lot. Your CV doesn’t have to.</p>
-        <p>Whether you’re writing your first resume or finding a better way to tell your experience, {BRAND.name} gives you a place to begin. Put your ideas into words, discover roles to explore, and prepare an application you can stand behind.</p>
-        <div className="hero-actions"><button className="button primary" onClick={() => navigate('builder')}>Build my CV <span>↗</span></button><button className="button secondary" onClick={onImport}>I already have a CV <span>→</span></button></div>
-        <p className="hero-footnote">Start without an account · Your words stay editable · Go at your own pace</p>
+        <p className="hero-intro">Turn your existing CV into a focused job search.</p>
+        <p>Upload your CV, review the extracted profile, then discover related jobs ranked by the skills and role information in each posting. {BRAND.name} shows the matching evidence so you can decide what to pursue.</p>
+        <div className="hero-actions"><button className="button primary" onClick={onImport}>Upload my CV and find jobs <span>→</span></button><button className="button secondary" onClick={() => navigate('jobs')}>Explore jobs <span>↗</span></button><button className="text-link" onClick={() => navigate('builder')}>Build my CV</button></div>
+        <p className="hero-footnote">Browse public remote jobs freely · Sign in for CV analysis and extended search</p>
       </div>
       <PaperCompanion />
     </section>
@@ -44,9 +44,9 @@ export default function LandingPage({ navigate, onImport }) {
       <div className="section-heading"><span className="eyebrow">FROM A BLANK PAGE TO A NEXT STEP</span><h2>You don’t have to do<br />everything at once.</h2><p>Bring what you have. We’ll help you give it shape, then make the next part of your search a little easier.</p></div>
       <div className="journey-grid">
         {[
-          ['01', 'Start with your story', 'No CV yet? Choose the sections that fit you and add a few details. Have one already? Upload it to extract a starting profile, then check that we got it right.'],
-          ['02', 'Make it clear and useful', 'Turn your experience into a readable, single-column CV. Review the wording, keep the facts yours, and download a document you can edit or share.'],
-          ['03', 'Take a thoughtful next step', 'Explore job listings, prepare a cover letter, and open the employer’s application page. You review and submit it yourself, with your own judgment in charge.'],
+          ['01', 'Upload your existing CV', 'Bring a PDF or Word CV, or paste its text. We extract the information for your review. Sign in in the same tab when analysis needs your account.'],
+          ['02', 'Review your profile', 'Correct your target role and skills before searching. Your extracted experience gives you a starting point, not a final verdict.'],
+          ['03', 'Explore ranked jobs', 'Review matched skills, gaps and title overlap. Check location and eligibility, then open the original listing to apply yourself.'],
         ].map(([number, title, copy]) => <article className="journey-card" key={number}><span className="step-number">{number}</span><h3>{title}</h3><p>{copy}</p></article>)}
       </div>
     </section>

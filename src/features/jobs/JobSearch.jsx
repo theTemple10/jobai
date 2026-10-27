@@ -293,7 +293,7 @@ function UploadStep({ onNext, initialData, onBuildCV }) {
 }
 
 // ─── STEP 1: PARSING ──────────────────────────────────────────────────────────
-function ParsingStep({ file, prompt, onDone }) {
+function ParsingStep({ file, prompt, onDone, onAuthenticationRequired }) {
   const [status, setStatus] = useState("Reading your CV…");
   const [progress, setProgress] = useState(0);
   useEffect(() => {
@@ -361,13 +361,14 @@ Additional context: ${prompt || "None provided"}`;
         resultTimer = setTimeout(() => {if (active) onDone(parsed);}, 600);
       } catch (err) {
         if (!active) return;
+        if(err.status===401 && onAuthenticationRequired){onAuthenticationRequired();return;}
         showToast(isModuleLoadError(err) ? MODULE_LOAD_MESSAGE : err.message || "Analysis failed. Please try again.", "error");
         resultTimer = setTimeout(() => {if (active) onDone(null);}, 1000);
       }
     })();
 
     return () => {active = false; controller.abort(); clearTimeout(resultTimer);};
-  }, [file, prompt, onDone]);
+  }, [file, prompt, onDone, onAuthenticationRequired]);
 
   return (
     <div className="max-w-lg mx-auto text-center py-16">
@@ -410,6 +411,7 @@ const Tag = ({ label, onRemove }) => (
 
 function ProfileStep({ profile, onNext }) {
   const [p, setP] = useState(profile);
+  const [newSkill,setNewSkill]=useState('');
 
 
 
@@ -478,6 +480,7 @@ function ProfileStep({ profile, onNext }) {
           </div>
         </div>
 
+        <div className="field"><label htmlFor="profile-skill">Add a missing skill</label><input id="profile-skill" maxLength={100} value={newSkill} onChange={event=>setNewSkill(event.target.value)}/><button className="button secondary" disabled={!newSkill.trim()} onClick={()=>{const skill=newSkill.trim();if(!p.skills.some(item=>item.toLowerCase()===skill.toLowerCase()))setP({...p,skills:[...p.skills,skill]});setNewSkill('');}}>Add skill</button></div>
         {/* Key Strengths */}
         <div className="rounded-2xl p-5 bg-ink/3 border border-ink/8">
           <div className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">Key Strengths</div>
@@ -788,6 +791,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
             </div>
           </div>
         )}
+        {tab === "requirements" && job.evidence && <section className="notice" aria-label="Match explanation"><h3>Why this role is ranked here</h3><p>{job.evidence.score === null?'Not enough evidence for a score.':`${job.evidence.score}% text evidence match`}</p><p>Detected skill coverage: {job.evidence.skillsScore ?? 'unavailable'}{job.evidence.skillsScore!==null?'%':''}. Target-title overlap: {job.evidence.titleScore ?? 'unavailable'}{job.evidence.titleScore!==null?'%':''}.</p><p>Skills found in both: {job.evidence.matched.join(', ') || 'None detected'}.</p><p>Posting mentions not in your listed skills: {job.evidence.missing.join(', ') || 'None detected'}. These are not necessarily mandatory requirements.</p><p>{job.evidence.method}</p></section>}
         {tab === "requirements" && (
           <div>
             <h3 className="text-ink/50 text-xs font-mono uppercase tracking-widest mb-3">Requirements</h3>
@@ -933,7 +937,7 @@ function TrackerPanel({ applications, onClose, onStatusChange, onDelete }) {
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* Storage or optional notifications may be unavailable. */ } };
 const load = (key, fallback) => readStored(key, fallback, value => typeof value === typeof fallback);
 
-export default function JobSearch({ forceUpload = false, onProfileParsed, onImport, onBuildCV }) {
+export default function JobSearch({ forceUpload = false, onProfileParsed, onImport, onBuildCV, user, onRequestSignIn }) {
   const [step, setStep] = useState(() => forceUpload ? 0 : readStored("jobai_step", 3, value => [0, 2, 3].includes(value)));
   const [uploadData, setUploadData] = useState(null);
   const [profile, setProfile] = useState(() => readJobProfile(normalizeProfile));
@@ -946,6 +950,8 @@ export default function JobSearch({ forceUpload = false, onProfileParsed, onImpo
     setStep(1);
     showToast("Uploading and analysing your CV…", "info");
   };
+
+  const authenticationRequired=()=>{setStep(0);onRequestSignIn?.(()=>handleUpload(uploadData));};
 
   const handleParsed = (parsedProfile) => {
     if (!parsedProfile) { setStep(0); return; }
@@ -1005,13 +1011,14 @@ export default function JobSearch({ forceUpload = false, onProfileParsed, onImpo
 
         {step === 0 && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
         {step === 1 && uploadData && (
-          <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} />
+          <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} onAuthenticationRequired={onRequestSignIn ? authenticationRequired : undefined} />
         )}
         {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
         {step === 1 && !uploadData && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
         {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
         {step === 3 && (
           <JobExplorer
+            user={user} onRequestSignIn={onRequestSignIn}
             applications={applications}
             profile={profile || EMPTY_PROFILE}
             onImport={onImport || handleReset}

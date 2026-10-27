@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import InfoPage from '../features/marketing/InfoPage.jsx';
 import LandingPage from '../features/marketing/LandingPage.jsx';
 import ResumeBuilder from '../features/resume/ResumeBuilder.jsx';
 import AccountPanel from '../features/account/AccountPanel.jsx';
+import SignInDialog from '../features/account/SignInDialog.jsx';
 import JobSearch from '../features/jobs/JobSearch.jsx';
 import { emptyResume, normalizeResume, resumeFromProfile, profileFromResume } from '../features/resume/resume.js';
 import { supabase } from '../features/account/supabase.js';
@@ -18,12 +19,17 @@ export default function ProductApp() {
   const [route, setRoute] = useState(() => readHandoff() ? 'builder' : routeFromLocation());
   const [resume, setResume] = useState(initialDraft);
   const [user, setUser] = useState(null);
+  const [signInOpen,setSignInOpen]=useState(false);
+  const pendingAction=useRef(null);
+  const closeSignIn=useCallback(()=>{pendingAction.current=null;setSignInOpen(false);},[]);
+  function requestSignIn(action){pendingAction.current=action;setSignInOpen(true);}
   const [cloudId, setCloudId] = useState(() => readHandoff()?.cloudId || null);
   const [dirty, setDirty] = useState(() => Boolean(readHandoff()));
   const [editorVersion,setEditorVersion] = useState(0);
   const [autoSave, setAutoSave] = useState(() => readStored('jobai_autosave', false, value => typeof value === 'boolean'));
   const [savedAt, setSavedAt] = useState('');
   const [importing, setImporting] = useState(false);
+  const [importTarget,setImportTarget]=useState('jobs');
   const [theme, setTheme] = useState(() => {try {return JSON.parse(localStorage.getItem('jobai_theme')) || 'system';} catch {return 'system';}});
   const [sessionError, setSessionError] = useState('');
   const [assetLoadFailed, setAssetLoadFailed] = useState(false);
@@ -89,6 +95,7 @@ export default function ProductApp() {
       if (accountIdRef.current && nextId !== accountIdRef.current) {setResume(emptyResume()); setCloudId(null);}
       accountIdRef.current = nextId;
       setUser(session?.user || null);
+      if(session?.user && pendingAction.current){const action=pendingAction.current;pendingAction.current=null;setSignInOpen(false);action();}
       if (session?.user && handoffRef.current) {handoffRef.current = null; navigateTo('builder');}
     });
     return () => {active = false; data.subscription.unsubscribe();};
@@ -107,7 +114,7 @@ export default function ProductApp() {
   function savedDevice(deleted = false) {setDirty(false); setSavedAt(deleted ? '' : new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));}
   function changeAutoSave(value) {setAutoSave(value); try {localStorage.setItem('jobai_autosave', JSON.stringify(value));} catch {setSessionError('This browser could not remember the device-saving preference.');} if (value) setDirty(true);}
   function newResume() {if (hasDraft(resume) && !window.confirm('Start a new CV? Save or download this version first if you want to keep it.')) return; setResume(emptyResume()); setCloudId(null); setDirty(true); setEditorVersion(value=>value+1); navigate('builder');}
-  function startImport() {setImporting(true); navigate('jobs');}
+  function startImport(target='jobs') {setImportTarget(target);setImporting(true); navigate('jobs');}
   function internalLink(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const anchor = event.target.closest('a');
@@ -129,10 +136,11 @@ export default function ProductApp() {
     {assetLoadFailed && <div role="alert" className="notice error container"><p>{MODULE_LOAD_MESSAGE}</p><button className="button secondary" onClick={() => window.location.reload()}>Reload page</button></div>}
     {sessionError && <p role="alert" className="notice error container">{sessionError}</p>}
     {(route === 'privacy' || route === 'help') && <InfoPage page={route} />}
-    {route === 'home' && <LandingPage navigate={navigate} onImport={startImport} />}
-    {route === 'builder' && <ResumeBuilder key={editorVersion} resume={resume} onChange={updateResume} user={user} cloudId={cloudId} onCloudSaved={setCloudId} onImport={startImport} onNew={newResume} dirty={dirty} autoSave={autoSave} onAutoSave={changeAutoSave} savedAt={savedAt} onDeviceSaved={savedDevice} onFindJobs={findJobs} navigate={navigate} />}
+    {route === 'home' && <LandingPage navigate={navigate} onImport={()=>startImport('jobs')} />}
+    {route === 'builder' && <ResumeBuilder key={editorVersion} resume={resume} onChange={updateResume} user={user} cloudId={cloudId} onCloudSaved={setCloudId} onImport={()=>startImport('builder')} onNew={newResume} dirty={dirty} autoSave={autoSave} onAutoSave={changeAutoSave} savedAt={savedAt} onDeviceSaved={savedDevice} onFindJobs={findJobs} navigate={navigate} />}
     {route === 'account' && <AccountPanel hasDraft={hasDraft(resume)} onPrepareSignIn={() => prepareAuthHandoff(resume, cloudId)} user={user} onOpenResume={openResume} navigate={navigate} />}
-    {route === 'jobs' && <JobSearch key={importing ? 'import' : 'search'} onImport={startImport} onBuildCV={() => navigate('builder')} forceUpload={importing} onProfileParsed={importing ? profile => {updateResume(resumeFromProfile(profile)); setCloudId(null); setImporting(false); navigate('builder');} : undefined} />}
+    {route === 'jobs' && <JobSearch key={importing ? 'import' : 'search'} onImport={()=>startImport('jobs')} onBuildCV={() => navigate('builder')} user={user} onRequestSignIn={requestSignIn} forceUpload={importing} onProfileParsed={importing && importTarget==='builder' ? profile=>{updateResume(resumeFromProfile(profile));setCloudId(null);setImporting(false);navigate('builder');}:undefined} />}
     <ProductFooter />
+    {signInOpen && <SignInDialog onClose={closeSignIn}/>}
   </div>;
 }

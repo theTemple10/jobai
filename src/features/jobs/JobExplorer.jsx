@@ -6,10 +6,10 @@ import { filterPublicJobs } from './publicSearch.js';
 
 const locations = ['All locations', 'Nigeria', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'Netherlands', 'UAE', 'South Africa', 'Remote'];
 
-export default function JobExplorer({ profile, applications, onApply, onImport, onEditProfile, DetailComponent }) {
+export default function JobExplorer({ profile, applications, onApply, onImport, onEditProfile, DetailComponent, user, onRequestSignIn }) {
   const Detail = DetailComponent;
   const [query, setQuery] = useState(profile.title || '');
-  const [source, setSource] = useState('public');
+  const [source, setSource] = useState(user && profile.title ? 'extended' : 'public');
   const [location, setLocation] = useState('All locations');
   const [jobs, setJobs] = useState([]);
   const [state, setState] = useState('idle');
@@ -19,6 +19,8 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
   const [selected, setSelected] = useState(null);
   const [lastQuery, setLastQuery] = useState('');
   const controllerRef = useRef();
+  const signInRef=useRef(onRequestSignIn);
+  useEffect(()=>{signInRef.current=onRequestSignIn;},[onRequestSignIn]);
   const headingRef = useRef();
   const applied = Object.fromEntries(applications.map(app => [app.id, app.status]));
 
@@ -35,6 +37,7 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
       const headers = source === 'public' ? {} : await authHeaders();
       const response = await fetch(source === 'public' ? '/api/public-jobs' : `/api/jobs?${params}`, {headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])});
       const data = await response.json().catch(() => ({}));
+      if(response.status===401 && signInRef.current){setState('idle');signInRef.current(()=>search(title,place));return;}
       if (!response.ok) throw new Error(data.error || 'We couldn’t load jobs just now. Please try again.');
       if (!Array.isArray(data.data)) throw new Error('The job service returned an unexpected result. Please try again.');
       if (controller.signal.aborted) return;
@@ -44,7 +47,7 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
         if (!item || typeof item !== 'object') return false;
         const key = item.job_id || `${item.job_title}|${item.employer_name}|${item.job_city}`;
         if (seen.has(key)) return false; seen.add(key); return true;
-      }).map((item, index) => normalizeJob(item, index, profile)).sort((a,b) => (b.match ?? -1) - (a.match ?? -1));
+      }).map((item, index) => normalizeJob(item, index, profile)).sort((a,b) => (b.evidence.score ?? -1) - (a.evidence.score ?? -1));
       setJobs(results); setLastQuery(term); setBoard('all'); setState('done');
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -77,16 +80,16 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
     <div className="jobs-layout">
       <aside className="job-sidebar">
         <section className="profile-note"><span className="eyebrow">YOUR STARTING POINT</span><div className="sidebar-icon"><Icon name="document" /></div><h2>{profile.name ? `A next step for ${profile.name.split(' ')[0]}.` : 'Bring your experience with you.'}</h2><p>{profile.title ? `Exploring ${profile.title} roles. Your listed skills help put relevant postings first.` : 'Search by role now, or build a CV to bring more context to your search.'}</p>{profile.skills.length > 0 && <div className="skill-chips">{profile.skills.slice(0,5).map(skill => <span key={skill}>{skill}</span>)}{profile.skills.length > 5 && <span>+{profile.skills.length - 5}</span>}</div>}<button className="text-link" onClick={onEditProfile}>{profile.title ? 'Review my profile' : 'Build my CV'} <span>↗</span></button><button className="sidebar-import" onClick={onImport}>Import an existing CV</button></section>
-        <section className="search-reassurance"><Icon name="spark" /><h3>Find a direction, not a verdict.</h3><p>Skill coverage means your listed skills appear in a posting. It isn’t a hiring prediction. Check eligibility and details with the employer.</p></section>
+        <section className="search-reassurance"><Icon name="spark" /><h3>Find a direction, not a verdict.</h3><p>Evidence matching compares detected skills and your target title with each posting. Open a role to see the calculation and gaps. It isn’t a hiring prediction; check eligibility with the employer.</p></section>
       </aside>
       <section className="job-results" aria-label="Job search results" aria-busy={state === 'loading'}>
-        <div className="results-heading"><div><span className="eyebrow">OPPORTUNITIES TO EXPLORE</span><h2>{state === 'idle' ? 'A new search starts here.' : state === 'loading' ? 'Looking for possibilities…' : `${filtered.length} ${filtered.length === 1 ? 'role' : 'roles'} to explore`}</h2>{state === 'done' && <p>Results for “{lastQuery}” · Sorted by listed skill coverage</p>}</div></div>
+        <div className="results-heading"><div><span className="eyebrow">OPPORTUNITIES TO EXPLORE</span><h2>{state === 'idle' ? 'A new search starts here.' : state === 'loading' ? 'Looking for possibilities…' : `${filtered.length} ${filtered.length === 1 ? 'role' : 'roles'} to explore`}</h2>{state === 'done' && <p>Results for “{lastQuery}” · Sorted by text evidence match</p>}</div></div>
         {(state === 'done' && jobs.length > 0) && <div className="job-filter-bar"><label className="remote-filter"><input type="checkbox" checked={remote} onChange={event => setRemote(event.target.checked)} />Remote in these results</label><label className="board-filter"><span className="sr-only">Job board filter</span><select aria-label="Job board filter" value={board} onChange={event => setBoard(event.target.value)}><option value="all">All sources</option>{publishers.map(publisher => <option key={publisher}>{publisher}</option>)}</select></label>{(remote || board !== 'all') && <button className="text-link" onClick={() => {setRemote(false); setBoard('all');}}>Clear filters</button>}</div>}
         {error && <div className="job-empty job-service-error" role="alert"><Icon name="globe" size={32} /><h3>Let’s get your search connected.</h3><p>{error}</p><div className="button-row"><button className="button secondary" onClick={() => search(query, location)}>Try again</button>{source !== 'public' && <a className="text-link" href="/account">Sign in for all-job search →</a>}</div><p className="form-help">You can keep building and downloading your CV while live search is unavailable.</p></div>}
         {state === 'loading' && <div className="job-loading" role="status"><span className="search-spinner" /><p>Checking the latest postings. You don’t need to start over.</p></div>}
         {state === 'idle' && !error && <div className="job-empty"><div className="empty-journey"><Icon name="search" size={40} /><span>✦</span></div><h3>There’s more than one way forward.</h3><p>Try a job title, a skill you enjoy using, or a company you’d like to work with. You can narrow the location above.</p><div className="suggested-searches">{['Frontend developer','Data analyst','Customer support'].map(term => <button key={term} onClick={() => {setQuery(term); search(term, location);}}>{term}<Icon name="arrow" size={15} /></button>)}</div></div>}
         {state === 'done' && filtered.length === 0 && <div className="job-empty"><Icon name="search" size={34} /><h3>{jobs.length ? 'Let’s give this search more room.' : 'No listings came back this time.'}</h3><p>{jobs.length ? 'Clear a filter to see more of the roles we found.' : 'Try a broader role or another location. Job availability changes, and no results doesn’t mean there’s no path forward.'}</p>{jobs.length > 0 && <button className="button secondary" onClick={() => {setRemote(false); setBoard('all');}}>Clear filters</button>}</div>}
-        {state === 'done' && <div className="job-card-list">{filtered.map(job => <button key={job.id} className="job-card" data-job-id={job.id} aria-label={`View ${job.title} at ${job.company}`} onClick={() => setSelected(job)}><span className="company-monogram" aria-hidden="true">{job.company.slice(0,2).toUpperCase()}</span><span className="job-card-main"><span className="job-company">{job.company}<span>{job.postedDays === null ? 'Date not listed' : `${job.postedDays}d ago`}</span></span><span className="job-title">{job.title}</span><span className="job-facts"><span><Icon name="location" size={14} />{job.location}</span><span>{job.type}</span></span><span className="job-tags"><span>{job.boardLabel || job.board}</span>{job.remote && <span className="remote-tag">Remote · check eligibility</span>}{applied[job.id] && <span className="activity-tag">{applied[job.id] === 'submitted' ? '✓ Submitted' : '↗ Opened'}</span>}</span><span className="job-card-bottom"><span>{job.salary}</span><span className="job-coverage">{job.match === null ? 'Add skills for coverage' : `${job.match}% listed skill coverage`}</span></span></span><Icon name="arrow" /></button>)}</div>}
+        {state === 'done' && <div className="job-card-list">{filtered.map(job => <button key={job.id} className="job-card" data-job-id={job.id} aria-label={`View ${job.title} at ${job.company}`} onClick={() => setSelected(job)}><span className="company-monogram" aria-hidden="true">{job.company.slice(0,2).toUpperCase()}</span><span className="job-card-main"><span className="job-company">{job.company}<span>{job.postedDays === null ? 'Date not listed' : `${job.postedDays}d ago`}</span></span><span className="job-title">{job.title}</span><span className="job-facts"><span><Icon name="location" size={14} />{job.location}</span><span>{job.type}</span></span><span className="job-tags"><span>{job.boardLabel || job.board}</span>{job.remote && <span className="remote-tag">Remote · check eligibility</span>}{applied[job.id] && <span className="activity-tag">{applied[job.id] === 'submitted' ? '✓ Submitted' : '↗ Opened'}</span>}</span><span className="job-card-bottom"><span>{job.salary}</span><span className="job-coverage">{job.evidence.score === null ? 'Not enough match evidence' : `${job.evidence.score}% text evidence match`}</span></span></span><Icon name="arrow" /></button>)}</div>}
       </section>
     </div>
   </div>;

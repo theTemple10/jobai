@@ -24,3 +24,14 @@ test('AI profile validation normalizes malformed collections and rejects unusabl
   const profile=normalizeProfile({title:'Engineer',skills:[42,'SQL'],experience:[null],name:'null'});
   assert.deepEqual(profile.skills,['SQL']);assert.deepEqual(profile.jobTitles,['Engineer']);assert.equal(profile.name,'');
 });
+
+test('text evidence uses posting skill coverage and title overlap with visible gaps',async()=>{
+  const {scoreJob}=await import('../src/features/jobs/matching.js');
+  const profile={title:'Developer',skills:['JavaScript','SQL','Writing']};
+  const match=scoreJob(profile,'Developer','JavaScript, SQL and Python');
+  assert.equal(match.skillsScore,67);assert.equal(match.titleScore,100);assert.equal(match.score,77);
+  assert.deepEqual(match.matched,['javascript','sql']);assert.deepEqual(match.missing,['python']);
+  assert.equal(scoreJob({title:'',skills:[]},'Developer','A role').score,null);
+  assert.equal(scoreJob({skills:['Java']},'Role','JavaScript').skillsScore,0);
+  assert.equal(scoreJob({title:'Developer',skills:['JS']},'Developer','JavaScript').score,100);
+});
