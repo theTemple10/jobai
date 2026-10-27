@@ -175,12 +175,15 @@ function StepIndicator({ current }) {
 }
 
 // ─── STEP 0: UPLOAD ───────────────────────────────────────────────────────────
-function UploadStep({ onNext }) {
-  const [file, setFile] = useState(null);
-  const [prompt, setPrompt] = useState("");
+function UploadStep({ onNext, initialData, onBuildCV }) {
+  const [file, setFile] = useState(initialData?.file || null);
+  const [prompt, setPrompt] = useState(initialData?.prompt || "");
+  const [inputMode, setInputMode] = useState(initialData?.text ? 'text' : 'file');
+  const [text, setText] = useState(initialData?.text || '');
   const [dragging, setDragging] = useState(false);
   const [consent, setConsent] = useState(false);
   const fileRef = useRef();
+  const ready = inputMode === 'text' ? text.trim().length >= 50 : Boolean(file);
 
   const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -221,6 +224,8 @@ function UploadStep({ onNext }) {
         </p>
       </div>
 
+      <div className="button-row mb-6"><button className="button secondary" aria-pressed={inputMode === 'file'} onClick={() => setInputMode('file')}>Upload a file</button><button className="button secondary" aria-pressed={inputMode === 'text'} onClick={() => setInputMode('text')}>Paste CV text</button></div>
+      {inputMode === 'text' ? <label className="field">Your existing CV or rough notes<textarea rows={10} maxLength={60000} value={text} onChange={event => setText(event.target.value)} placeholder="Paste your existing CV here. It does not need to be well written." /><span className="form-help">At least 50 characters. Review the extracted facts before using them.</span></label> : <>
       {/* Drop Zone */}
       <div
         className={`relative rounded-2xl border-2 border-dashed transition-all duration-300 cursor-pointer mb-6 ${
@@ -252,6 +257,7 @@ function UploadStep({ onNext }) {
         </div>
       </div>
 
+      </>}
       {/* Optional Prompt */}
       <div className="mb-6">
         <label className="block text-ink/80 text-xs font-mono mb-2 uppercase tracking-widest">
@@ -269,17 +275,19 @@ function UploadStep({ onNext }) {
 
       <label className="consent"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />I agree to send this CV’s text or image to the AI provider for analysis. The extracted profile will be saved on this device.</label>
       <button
-        disabled={!file || !consent}
-        onClick={() => onNext({ file, prompt })}
+        disabled={!ready || !consent}
+        onClick={() => onNext({file: inputMode === 'text' ? new File([text], 'pasted-cv.txt', {type:'text/plain'}) : file, prompt, text:inputMode === 'text' ? text : ''})}
         className="w-full py-4 rounded-xl font-bold text-white text-base transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
         style={{
-          background: file ? "linear-gradient(135deg, #6366F1, #4F46E5)" : "var(--bg-disabled)",
-          boxShadow: file ? "0 0 30px rgba(99,102,241,0.3)" : "none",
+          background: ready ? "linear-gradient(135deg, #6366F1, #4F46E5)" : "var(--bg-disabled)",
+          boxShadow: ready ? "0 0 30px rgba(99,102,241,0.3)" : "none",
           fontFamily: "'Outfit', sans-serif",
         }}
       >
         Analyse CV with AI →
       </button>
+      <p className="form-help">AI import requires sign-in. Your text stays in this tab if analysis fails.</p>
+      {onBuildCV && <button className="text-link" onClick={onBuildCV}>Build from short answers without signing in →</button>}
     </div>
   );
 }
@@ -311,7 +319,9 @@ Additional context: ${prompt || "None provided"}` },
         } else {
           // PDF or DOCX → extract text client-side, send as plain text
           let cvText;
-          if (isDocx) {
+          if (file.type === 'text/plain') {
+            cvText = await file.text();
+          } else if (isDocx) {
             setStatus("Extracting text from Word document…");
             cvText = await extractDocxText(file);
             if (!cvText || cvText.length < 50) throw new Error("Could not extract text from this Word document. Please try saving it as a PDF and uploading that instead.");
@@ -993,12 +1003,12 @@ export default function JobSearch({ forceUpload = false, onProfileParsed, onImpo
         <div className="flex flex-wrap justify-end gap-3 mb-6"><button className="button secondary" onClick={() => setShowTracker(true)}>Application activity ({applications.length})</button><button className="text-link" onClick={() => step === 0 ? setStep(3) : handleReset()}>{step === 0 ? "Explore jobs instead" : profile ? "Import a different CV" : "Import a CV"}</button></div>
         {step < 3 && (uploadData || step === 0) && <StepIndicator current={step} />}
 
-        {step === 0 && <UploadStep onNext={handleUpload} />}
+        {step === 0 && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
         {step === 1 && uploadData && (
           <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} />
         )}
         {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
-        {step === 1 && !uploadData && <UploadStep onNext={handleUpload} />}
+        {step === 1 && !uploadData && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
         {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
         {step === 3 && (
           <JobExplorer
@@ -1011,7 +1021,7 @@ export default function JobSearch({ forceUpload = false, onProfileParsed, onImpo
           />
         )}
         {/* If step=2 or 3 but profile lost somehow, go back to upload */}
-        {step === 2 && !profile && <UploadStep onNext={handleUpload} />}
+        {step === 2 && !profile && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
       </main>
 
       {showTracker && <TrackerPanel applications={applications} onClose={closeTracker} onStatusChange={handleStatusChange} onDelete={handleDelete} />}

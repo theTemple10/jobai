@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeJob } from './jobs.js';
 import { authHeaders } from '../../shared/lib/ai.js';
 import Icon from '../../shared/components/Icon.jsx';
+import { filterPublicJobs } from './publicSearch.js';
 
 const locations = ['All locations', 'Nigeria', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'Netherlands', 'UAE', 'South Africa', 'Remote'];
 
 export default function JobExplorer({ profile, applications, onApply, onImport, onEditProfile, DetailComponent }) {
   const Detail = DetailComponent;
   const [query, setQuery] = useState(profile.title || '');
+  const [source, setSource] = useState('public');
   const [location, setLocation] = useState('All locations');
   const [jobs, setJobs] = useState([]);
   const [state, setState] = useState('idle');
@@ -30,14 +32,15 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
     try {
       const params = new URLSearchParams({query: term + (place !== 'All locations' && place !== 'Remote' ? ` in ${place}` : '')});
       if (place === 'Remote') params.set('remote_jobs_only', 'true');
-      const headers = await authHeaders();
-      const response = await fetch(`/api/jobs?${params}`, {headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])});
+      const headers = source === 'public' ? {} : await authHeaders();
+      const response = await fetch(source === 'public' ? '/api/public-jobs' : `/api/jobs?${params}`, {headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])});
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'We couldn’t load jobs just now. Please try again.');
       if (!Array.isArray(data.data)) throw new Error('The job service returned an unexpected result. Please try again.');
       if (controller.signal.aborted) return;
       const seen = new Set();
-      const results = data.data.filter(item => {
+      const listings = source === 'public' ? filterPublicJobs(data.data, term, place) : data.data;
+      const results = listings.filter(item => {
         if (!item || typeof item !== 'object') return false;
         const key = item.job_id || `${item.job_title}|${item.employer_name}|${item.job_city}`;
         if (seen.has(key)) return false; seen.add(key); return true;
@@ -48,7 +51,7 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
       setError(err.name === 'TimeoutError' ? 'The search took longer than expected. Please try again.' : err.message);
       setJobs([]); setState('error');
     }
-  }, [profile]);
+  }, [profile, source]);
 
   useEffect(() => {
     // Run once for each supplied profile; manual searches remain user actions.
@@ -64,6 +67,8 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
 
   return <div className="job-explorer">
     <header className="jobs-heading"><div><span className="eyebrow">A LITTLE DIRECTION FOR YOUR NEXT CHAPTER</span><h1>Find your next possibility.</h1><p>A role worth exploring starts with what matters to you.</p></div><span className="jobs-heading-art" aria-hidden="true"><Icon name="briefcase" size={42} /><span>↗</span></span></header>
+    <label className="field">Search source<select aria-label="Job search source" value={source} onChange={event => {controllerRef.current?.abort();setSource(event.target.value);setJobs([]);setState('idle');setError('');}}><option value="public">Remote jobs · no account needed</option><option value="extended">All jobs · sign-in required</option></select></label>
+    {source === 'public' && <p className="notice">Remote listings from <a href="https://remotive.com" target="_blank" rel="noopener noreferrer">Remotive</a>, delayed by at least 24 hours. Country filters match the listing’s stated location; always check eligibility with the employer.</p>}
     <form className="job-search-form" onSubmit={event => {event.preventDefault(); search(query, location);}}>
       <label className="search-field"><span>What would you like to do?</span><span className="search-input"><Icon name="search" /><input aria-label="Job title, skill, or company" value={query} maxLength={150} onChange={event => setQuery(event.target.value)} placeholder="Role, skill, or company" autoComplete="off" /></span></label>
       <label className="search-field"><span>Where would you like to work?</span><span className="search-input"><Icon name="location" /><select aria-label="Job search location" value={location} onChange={event => setLocation(event.target.value)}>{locations.map(place => <option key={place}>{place}</option>)}</select></span></label>
@@ -77,7 +82,7 @@ export default function JobExplorer({ profile, applications, onApply, onImport, 
       <section className="job-results" aria-label="Job search results" aria-busy={state === 'loading'}>
         <div className="results-heading"><div><span className="eyebrow">OPPORTUNITIES TO EXPLORE</span><h2>{state === 'idle' ? 'A new search starts here.' : state === 'loading' ? 'Looking for possibilities…' : `${filtered.length} ${filtered.length === 1 ? 'role' : 'roles'} to explore`}</h2>{state === 'done' && <p>Results for “{lastQuery}” · Sorted by listed skill coverage</p>}</div></div>
         {(state === 'done' && jobs.length > 0) && <div className="job-filter-bar"><label className="remote-filter"><input type="checkbox" checked={remote} onChange={event => setRemote(event.target.checked)} />Remote in these results</label><label className="board-filter"><span className="sr-only">Job board filter</span><select aria-label="Job board filter" value={board} onChange={event => setBoard(event.target.value)}><option value="all">All sources</option>{publishers.map(publisher => <option key={publisher}>{publisher}</option>)}</select></label>{(remote || board !== 'all') && <button className="text-link" onClick={() => {setRemote(false); setBoard('all');}}>Clear filters</button>}</div>}
-        {error && <div className="job-empty job-service-error" role="alert"><Icon name="globe" size={32} /><h3>Let’s get your search connected.</h3><p>{error}</p><div className="button-row"><button className="button secondary" onClick={() => search(query, location)}>Try again</button><a className="text-link" href="/account">Open my workspace →</a></div><p className="form-help">You can keep building and downloading your CV while live search is unavailable.</p></div>}
+        {error && <div className="job-empty job-service-error" role="alert"><Icon name="globe" size={32} /><h3>Let’s get your search connected.</h3><p>{error}</p><div className="button-row"><button className="button secondary" onClick={() => search(query, location)}>Try again</button>{source !== 'public' && <a className="text-link" href="/account">Sign in for all-job search →</a>}</div><p className="form-help">You can keep building and downloading your CV while live search is unavailable.</p></div>}
         {state === 'loading' && <div className="job-loading" role="status"><span className="search-spinner" /><p>Checking the latest postings. You don’t need to start over.</p></div>}
         {state === 'idle' && !error && <div className="job-empty"><div className="empty-journey"><Icon name="search" size={40} /><span>✦</span></div><h3>There’s more than one way forward.</h3><p>Try a job title, a skill you enjoy using, or a company you’d like to work with. You can narrow the location above.</p><div className="suggested-searches">{['Frontend developer','Data analyst','Customer support'].map(term => <button key={term} onClick={() => {setQuery(term); search(term, location);}}>{term}<Icon name="arrow" size={15} /></button>)}</div></div>}
         {state === 'done' && filtered.length === 0 && <div className="job-empty"><Icon name="search" size={34} /><h3>{jobs.length ? 'Let’s give this search more room.' : 'No listings came back this time.'}</h3><p>{jobs.length ? 'Clear a filter to see more of the roles we found.' : 'Try a broader role or another location. Job availability changes, and no results doesn’t mean there’s no path forward.'}</p>{jobs.length > 0 && <button className="button secondary" onClick={() => {setRemote(false); setBoard('all');}}>Clear filters</button>}</div>}

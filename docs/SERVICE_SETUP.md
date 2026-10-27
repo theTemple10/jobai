@@ -1,6 +1,6 @@
 # Connect the live services
 
-Guided notes, the section editor, and PDF/Word/text downloads work without AI or a database. Live AI assistance, imported-CV analysis, account saving, and job listings need the connections below. Having a Supabase project URL alone does not activate these features.
+Guided notes, the section editor, PDF/Word/text downloads, and public remote-job discovery work without an account. Public remote listings come from Remotive; AI assistance, imported-CV analysis, account saving, and extended JSearch listings need the connections below. Having a Supabase project URL alone does not activate these features.
 
 ## Environment variables
 
@@ -24,9 +24,15 @@ Run `npm run check:config` with Node 22 to check variable presence without revea
 ## Supabase database and email sign-in
 
 1. Open the project's SQL Editor. Apply `supabase/migrations/202610090001_workspace.sql` once on a fresh project. It creates the resumes table, row ownership policies, and per-user provider quotas. If the objects already exist, inspect the migration history before rerunning: this migration deliberately does not hide an existing conflicting schema.
-2. In Authentication → URL Configuration, set Site URL to the production origin. Add allowed redirect URLs for the app's `/account` page, such as `https://jobai-orpin.vercel.app/account` and your intended preview's `/account` URL. Add local `/account` redirects only when testing locally. The application redirects email links to `/account` on the current origin.
+2. In Authentication → URL Configuration, set **Site URL** to `https://jobai-orpin.vercel.app`. Add **Redirect URLs**: `https://jobai-orpin.vercel.app/account` and your intended preview's exact `/account` URL. Add local `/account` redirects only when testing locally. The application requests `/account` on the current origin. If the confirmation email still goes to localhost, inspect both the Confirm signup and Magic Link email templates: their sign-in anchor should normally use `{{ .ConfirmationURL }}`, rather than a hardcoded localhost link or `{{ .SiteURL }}` alone. Request a new email after correcting these settings; old emails retain their original links. These are Supabase dashboard settings, not `.env.local` values.
 3. Enable the email provider. Configure production email delivery/SMTP and check the project's actual sending limits. An accepted sign-in request does not prove the email arrived.
-4. Set the environment variables, redeploy, and test with two separate users. Each should be able to create, reopen, update, and delete only their own CVs. An unsigned request to a paid provider must be rejected; a signed request must pass the quota RPC before calling the provider.
+4. Set the environment variables, redeploy, and test with two separate users. Each should be able to create, reopen, update, and delete only their own CVs. An unsigned request to a paid provider must be rejected; a signed request must pass the quota RPC before calling the provider. Public remote discovery uses `/api/public-jobs`, requires neither account nor provider key, and must never invoke the paid endpoints.
+
+## Public remote-job discovery
+
+`/api/public-jobs` fetches the fixed Remotive public feed. The browser filters it by role/company text and stated location. It displays attribution, the source's original country restriction, and links back to the Remotive listing. Results are delayed by at least 24 hours, have limited coverage, and are not proof of eligibility. This feed is not a replacement for broad local/on-site JSearch coverage.
+
+The fixed endpoint uses a six-hour CDN cache and a six-hour per-process cache, coalescing simultaneous refreshes within a process. No JSearch/Groq requests or signups are involved. Remotive advises no more than four feed fetches per day; per-process and regional CDN caching do not guarantee a global fetch ceiling across cold starts/regions. Verify deployed caching and request volume; use a single scheduled/shared feed cache before scaling traffic. Source guidance: [Remotive API documentation](https://github.com/remotive-com/remote-jobs-api).
 
 See [Supabase redirect URL guidance](https://supabase.com/docs/guides/auth/redirect-urls) and [email-link authentication](https://supabase.com/docs/guides/auth/auth-email-passwordless). Check current provider plans and limits in your accounts before public launch.
 

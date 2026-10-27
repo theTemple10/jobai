@@ -37,7 +37,7 @@ test('existing Word CV imports into editable builder fields',async({page})=>{
 
 test('opened listing becomes submitted only after user confirmation',async({page,context})=>{
   await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({name:'Ada',title:'Developer',skills:['Python'],jobTitles:['Developer']}));});
-  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Python Developer',employer_name:'Community Labs',job_description:'Build Python tools for community services.',job_apply_link:'https://example.com/jobs/role-1'}]})}));
+  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Python Developer',employer_name:'Community Labs',job_description:'Build Python tools for community services.',job_apply_link:'https://example.com/jobs/role-1'}]})}));
   await context.route('https://example.com/**',route=>route.fulfill({body:'Application page'}));
   await page.goto('/#/jobs');await page.getByRole('button',{name:'View Python Developer at Community Labs'}).click();
   await page.getByRole('button',{name:'Apply on'}).click();
@@ -82,7 +82,7 @@ test('draft saving is explicit, recoverable, and removable',async({page})=>{
 
 test('job provider failure is a persistent error without fictional listings',async({page})=>{
   await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({name:'Ada',title:'Developer',skills:['Python'],jobTitles:['Developer']}));});
-  await page.route('**/api/jobs?**',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'The job provider is unavailable.'})}));
+  await page.route('**/api/public-jobs',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'The job provider is unavailable.'})}));
   await page.goto('/#/jobs');await expect(page.getByRole('alert')).toContainText('The job provider is unavailable');
   await expect(page.getByText('TechCorp')).toHaveCount(0);await expect(page.getByText('GlobalBank')).toHaveCount(0);
 });
@@ -129,15 +129,15 @@ test('automatic device saving is explicit and preserves later edits',async({page
 });
 
 test('first visit offers search without a CV and submits one bounded query',async({page})=>{
-  const requests=[];await page.route('**/api/jobs?**',route=>{requests.push(route.request().url());return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})});});
+  const requests=[];await page.route('**/api/public-jobs',route=>{requests.push(route.request().url());return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})});});
   await page.goto('/jobs');await expect(page.getByLabel('Job title, skill, or company')).toBeVisible();expect(requests).toHaveLength(0);
   await page.getByLabel('Job title, skill, or company').fill('Frontend developer');await page.getByLabel('Job search location').selectOption('Remote');await page.getByRole('button',{name:'Find jobs',exact:true}).click();
-  await expect(page.getByText('No listings came back this time.')).toBeVisible();expect(requests).toHaveLength(1);expect(requests[0]).toContain('remote_jobs_only=true');
+  await expect(page.getByText('No listings came back this time.')).toBeVisible();expect(requests).toHaveLength(1);expect(new URL(requests[0]).pathname).toBe('/api/public-jobs');
 });
 
 test('restored cover letters retain preparation actions and project evidence',async({page})=>{
   await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({name:'Ada',title:'Developer',skills:['Python'],jobTitles:['Developer'],projects:[{name:'Community tool',highlights:['Built accessible search']}]}));localStorage.setItem('jobai_letter_role-1',JSON.stringify('Dear Hiring Manager, I build Python tools.'));});
-  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Developer',employer_name:'Community Labs',job_description:'Python development'}]})}));
+  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Developer',employer_name:'Community Labs',job_description:'Python development'}]})}));
   await page.route('**/api/groq',route=>{const payload=route.request().postDataJSON();expect(payload.messages[0].content).toContain('Built accessible search');return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:'A reviewed letter.'}}]})});});
   await page.goto('/jobs');await page.getByRole('button',{name:'View Developer at Community Labs'}).click();
   await expect(page.getByRole('button',{name:'Open listing & copy letter',exact:true})).toBeVisible();
@@ -153,7 +153,7 @@ test('returning visitors can deliberately import a different CV',async({page})=>
 
 test('job cards and detail actions fit narrow screens in both themes',async({page})=>{
   await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({title:'Developer',skills:['Python']}));});
-  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Senior Frontend Developer, Accessibility and Design Systems',employer_name:'Community Labs International',job_description:'Build accessible Python tools.\nReview real requirements.',job_city:'Lagos',job_country:'Nigeria',job_is_remote:true}]})}));
+  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Senior Frontend Developer, Accessibility and Design Systems',employer_name:'Community Labs International',job_description:'Build accessible Python tools.\nReview real requirements.',job_city:'Lagos',job_country:'Nigeria',job_is_remote:true}]})}));
   for(const width of [320,375,768,1440]) {
     await page.setViewportSize({width,height:950});await page.goto('/jobs');await expect(page.getByRole('button',{name:/View Senior Frontend Developer/})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
@@ -227,7 +227,7 @@ test('guided guest journey reaches a real export and job discovery without AI',a
   const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:'Download PDF ↓',exact:true}).click();
   const pdf=await downloaded;const text=execFileSync('pdftotext',[await pdf.path(),'-'],{encoding:'utf8'});
   expect(text).toContain('Ada Obi');expect(text).toContain('keyboard navigation');expect(aiRequests).toBe(0);
-  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})}));
+  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})}));
   await page.getByRole('button',{name:'Explore jobs for this profile →'}).click();
   await expect(page.getByRole('heading',{level:1})).toHaveText('Find your next possibility.');
   await expect(page.getByText('No listings came back this time.')).toBeVisible();
@@ -277,4 +277,70 @@ test('guided choices and draft review fit small screens in both themes',async({p
     expect(bounds.y).toBeGreaterThanOrEqual(header.y+header.height);expect(bounds.y+bounds.height).toBeLessThan(850);
     await page.screenshot({path:`/tmp/roleaide-guided-${theme}-mobile.png`,fullPage:true});
   }
+});
+
+
+test('sign-in success is prominent, targets this site, and prevents duplicate sends',async({page})=>{
+  let sends=0;
+  await page.route('**/auth/v1/otp**',async route=>{
+    sends++;
+    expect(new URL(route.request().url()).searchParams.get('redirect_to')).toBe('http://127.0.0.1:5173/account');
+    expect(route.request().postDataJSON().email).toBe('ada@example.com');
+    await route.fulfill({contentType:'application/json',body:'{}'});
+  });
+  await page.goto('/account');
+  await page.getByLabel('Email address').fill('ada@example.com');
+  await page.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('Check your inbox');
+  await expect(page.getByRole('status')).toContainText('ada@example.com');
+  await expect(page.getByRole('button',{name:/Request another link in/})).toBeDisabled();
+  expect(sends).toBe(1);
+  expect(await page.evaluate(()=>document.activeElement?.textContent)).toContain('Check your inbox');
+  await expect(page.getByRole('button',{name:'Continue building my CV →'})).toBeVisible();
+});
+
+test('sign-in rejection is visible and permits retry',async({page})=>{
+  await page.route('**/auth/v1/otp**',route=>route.fulfill({status:429,contentType:'application/json',body:JSON.stringify({msg:'Please wait before requesting another email.'})}));
+  await page.goto('/account');await page.getByLabel('Email address').fill('ada@example.com');
+  await page.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Please wait');
+  await expect(page.getByRole('button',{name:'Email me a sign-in link →',exact:true})).toBeEnabled();
+  await expect(page.getByText('Check your inbox',{exact:true})).toHaveCount(0);
+});
+
+test('pasted CV can be retried after a failure without losing its text',async({page})=>{
+  let attempts=0;
+  await page.route('**/api/groq',async route=>{
+    expect(buildRequest(route.request().postDataJSON()).messages[1].content).toContain('Built a community directory');
+    attempts++;
+    if(attempts===1) return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Please try again.'})});
+    return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Obi',title:'Developer',skills:['JavaScript']})}}]})});
+  });
+  await page.goto('/builder?mode=editor');await page.getByRole('button',{name:'Import an existing CV'}).click();
+  await page.getByRole('button',{name:'Paste CV text',exact:true}).click();
+  const notes='Ada Obi. Built a community directory using JavaScript for a local volunteer group.';
+  await page.getByLabel('Your existing CV or rough notes').fill(notes);
+  await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
+  await expect(page.getByLabel('Your existing CV or rough notes')).toHaveValue(notes);
+  await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
+  await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Ada Obi');
+});
+
+
+test('guests see attributed remote listings before account access and can filter country text',async({page})=>{
+  let paidRequests=0;
+  page.on('request',request=>{if(request.url().includes('/api/jobs?')) paidRequests++;});
+  await page.route('**/api/public-jobs',route=>{
+    expect(route.request().headers().authorization).toBeUndefined();
+    return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[
+      {job_id:'global',job_title:'Developer',employer_name:'Global Example',job_description:'Build JavaScript tools',job_country:'Worldwide',job_is_remote:true,job_publisher:'Remotive',job_apply_link:'https://remotive.com/remote-jobs/software-dev/global-1'},
+      {job_id:'usa',job_title:'Developer',employer_name:'US Example',job_description:'Build JavaScript tools',job_country:'United States',job_is_remote:true,job_publisher:'Remotive'}
+    ]})});
+  });
+  await page.goto('/jobs');await page.getByLabel('Job title, skill, or company').fill('Developer');
+  await page.getByLabel('Job search location').selectOption('Nigeria');await page.getByRole('button',{name:'Find jobs',exact:true}).click();
+  await expect(page.getByRole('button',{name:'View Developer at Global Example'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'View Developer at US Example'})).toHaveCount(0);
+  await expect(page.getByText(/delayed by at least 24 hours/)).toBeVisible();
+  expect(paidRequests).toBe(0);
 });

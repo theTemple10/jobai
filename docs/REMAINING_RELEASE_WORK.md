@@ -2,6 +2,8 @@
 
 This is the current product list. Local verification, remote deployment and observed user success are separate milestones. The October 19 production audit is historical; do not re-open already-fixed issues without checking current source.
 
+October 27 update: local public remote-job discovery, prominent email-link feedback and pasted CV intake are documented in `UX_ACCEPTANCE_2026-10-27.md`. These changes still need deployment. Production's account configuration gate returned 401 after the owner's fix; actual sign-in currently redirects to localhost according to the owner. Correct Supabase URL configuration/email templates and request a fresh link, then verify delivery and return to `/account`. Dictation remains an idea, not an implemented feature.
+
 ## 1. PDF reader asset recovery and deployment
 
 The reported production URL `/assets/pdf-BE5t8-JP.js` returned **404**. The current homepage referenced `/assets/pdf-CBRN-wbG.js`, which returned **200**. This supports an old open page or cached entry referring to a removed deployment asset; it does not identify which browser/cache retained the old reference.
