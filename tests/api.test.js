@@ -26,3 +26,33 @@ test('production provider endpoints fail closed without account/quota configurat
     await assert.rejects(rateLimit('test','ai',30),{status:503});
   } finally {for(const key of keys) if(previous[key]===undefined) delete process.env[key]; else process.env[key]=previous[key];}
 });
+
+test('authenticated parsing and job search pass identity and atomic quota gates before providers', async()=>{
+  const {default:parse}=await import('../api/groq.js');
+  const {default:jobs}=await import('../api/jobs.js');
+  const keys=['NODE_ENV','SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','GROQ_API_KEY','JSEARCH_KEY'];
+  const previous=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+  const previousFetch=globalThis.fetch;
+  const calls=[];
+  const response=()=>({status(code){this.code=code;return this;},json(body){this.body=body;return this;}});
+  try {
+    Object.assign(process.env,{NODE_ENV:'production',SUPABASE_URL:'https://test.supabase.co',SUPABASE_PUBLISHABLE_KEY:'test-public',GROQ_API_KEY:'test-groq',JSEARCH_KEY:'test-jobs'});
+    globalThis.fetch=async(url,options)=>{
+      calls.push(url);
+      if(url.endsWith('/auth/v1/user'))return {ok:true,json:async()=>({id:'test-user'})};
+      if(url.includes('/rpc/')){assert.equal(options.headers.Authorization,'Bearer test');return {ok:true,json:async()=>true};}
+      if(url.includes('groq.com'))return {ok:true,json:async()=>({choices:[{message:{content:'{"title":"Developer","skills":["JavaScript"]}'}}]})};
+      if(url.includes('jsearch.'))return {ok:true,json:async()=>({data:[{job_id:'real-provider-shape',job_title:'Developer'}]})};
+      throw new Error('Unexpected URL');
+    };
+    const unsigned=response();await parse({method:'POST',headers:{},body:{operation:'parse',messages:[{role:'user',content:'Candidate CV facts.'}]}},unsigned);
+    assert.equal(unsigned.code,401);assert.equal(calls.length,0);
+    const cv=response();await parse({method:'POST',headers:{authorization:'Bearer test'},body:{operation:'parse',messages:[{role:'user',content:'Candidate CV facts.'}]}},cv);
+    assert.equal(cv.code,200);assert.equal(calls.length,3);assert.match(calls[1],/consume_service_quota/);assert.match(calls[2],/groq/);
+    const search=response();await jobs({method:'GET',headers:{authorization:'Bearer test'},query:{query:'Developer in Nigeria'}},search);
+    assert.equal(search.code,200);assert.match(calls[4],/consume_service_quota/);assert.match(calls[5],/jsearch/);
+    globalThis.fetch=async url=>({ok:true,json:async()=>url.endsWith('/auth/v1/user')?{id:'test-user'}:false});
+    const limited=response();await jobs({method:'GET',headers:{authorization:'Bearer test'},query:{query:'Developer'}},limited);
+    assert.equal(limited.code,429);
+  } finally {globalThis.fetch=previousFetch;for(const key of keys)if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key];}
+});

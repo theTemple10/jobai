@@ -234,3 +234,8 @@ main:focus,.job-detail-shell:focus {outline:none;}
 .people-talking {width:70%;height:92%;right:-12%;bottom:-10%;object-position:55% 45%;transform:rotate(8deg);}
 .dark .hero-people img {opacity:.28;filter:blur(3px) saturate(.5);}
 @media(max-width:640px) {.hero-people {inset:-15px 8px;}.people-working {left:-4%;}.people-talking {right:-4%;}}
+
+.auth-overlay {position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto;}
+.auth-dialog {background:var(--surface);border:1px solid var(--line);border-radius:12px;width:min(100%,590px);max-height:90dvh;overflow:auto;padding:20px;}
+.auth-dialog .account-card {border:0;padding:15px;}.auth-close {display:block;margin-left:auto;}
+.auth-dialog .field input {min-width:0;}.auth-dialog .notice {overflow-wrap:anywhere;}
