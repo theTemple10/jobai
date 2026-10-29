@@ -4,6 +4,7 @@ import LandingPage from '../features/marketing/LandingPage.jsx';
 import ResumeBuilder from '../features/resume/ResumeBuilder.jsx';
 import AccountPanel from '../features/account/AccountPanel.jsx';
 import SignInDialog from '../features/account/SignInDialog.jsx';
+import SignInForm from '../features/account/SignInForm.jsx';
 import JobSearch from '../features/jobs/JobSearch.jsx';
 import { emptyResume, normalizeResume, resumeFromProfile, profileFromResume } from '../features/resume/resume.js';
 import { supabase } from '../features/account/supabase.js';
@@ -19,6 +20,8 @@ export default function ProductApp() {
   const [route, setRoute] = useState(() => readHandoff() ? 'builder' : routeFromLocation());
   const [resume, setResume] = useState(initialDraft);
   const [user, setUser] = useState(null);
+  const [authReady,setAuthReady]=useState(!supabase);
+  const [passwordRecovery,setPasswordRecovery]=useState(false);
   const [signInOpen,setSignInOpen]=useState(false);
   const pendingAction=useRef(null);
   const closeSignIn=useCallback(()=>{pendingAction.current=null;setSignInOpen(false);},[]);
@@ -87,6 +90,7 @@ export default function ProductApp() {
     let active = true;
     supabase.auth.getSession().then(({data, error}) => {
       if (!active) return;
+      setAuthReady(true);
       if (error) setSessionError(error.message);
       else {setUser(data.session?.user || null); if (data.session?.user && handoffRef.current) {handoffRef.current = null; navigateTo('builder');}}
     });
@@ -94,9 +98,11 @@ export default function ProductApp() {
       const nextId = session?.user?.id || null;
       if (accountIdRef.current && nextId !== accountIdRef.current) {setResume(emptyResume()); setCloudId(null);}
       accountIdRef.current = nextId;
-      setUser(session?.user || null);
-      if(session?.user && pendingAction.current){const action=pendingAction.current;pendingAction.current=null;setSignInOpen(false);action();}
-      if (session?.user && handoffRef.current) {handoffRef.current = null; navigateTo('builder');}
+      setUser(session?.user || null);setAuthReady(true);
+      if(_event==='PASSWORD_RECOVERY'){handoffRef.current=null;setPasswordRecovery(true);navigateTo('account');}
+      if(session?.user && _event!=='PASSWORD_RECOVERY'){try{const target=sessionStorage.getItem('roleaide_auth_return');if(['/jobs','/builder','/account'].includes(target)){sessionStorage.removeItem('roleaide_auth_return');navigateTo(target.slice(1));}}catch{/* Account access also works when browser storage is restricted. */}}
+      if(session?.user && _event!=='PASSWORD_RECOVERY' && pendingAction.current){const action=pendingAction.current;pendingAction.current=null;setSignInOpen(false);action(session.user);}
+      if (session?.user && _event!=='PASSWORD_RECOVERY' && handoffRef.current) {handoffRef.current = null; navigateTo('builder');}
     });
     return () => {active = false; data.subscription.unsubscribe();};
   }, []);
@@ -124,6 +130,7 @@ export default function ProductApp() {
     if (url.origin === window.location.origin && destination && !url.hash && !url.search) {event.preventDefault(); navigate(destination);}
   }
   function openResume(saved) {if (dirty && hasDraft(resume) && !window.confirm('Open this saved CV and replace your unsaved editing session?')) return; setResume(normalizeResume(saved.document)); setEditorVersion(value=>value+1); setCloudId(saved.id); setDirty(false); navigate('builder');}
+  function buildProfile(profile){const open=()=>{updateResume(resumeFromProfile(profile));setCloudId(null);setEditorVersion(value=>value+1);setImporting(false);navigate('builder');};if(user)open();else requestSignIn(open);}
   function findJobs(document) {
     const profile = profileFromResume(document);
     try {localStorage.setItem('jobai_profile', JSON.stringify(profile)); localStorage.setItem('jobai_step', '3');} catch {setSessionError('Your browser could not save the profile. Enable device storage to use job matching.'); return;}
@@ -137,9 +144,13 @@ export default function ProductApp() {
     {sessionError && <p role="alert" className="notice error container">{sessionError}</p>}
     {(route === 'privacy' || route === 'help') && <InfoPage page={route} />}
     {route === 'home' && <LandingPage navigate={navigate} onImport={()=>startImport('jobs')} />}
-    {route === 'builder' && <ResumeBuilder key={editorVersion} resume={resume} onChange={updateResume} user={user} cloudId={cloudId} onCloudSaved={setCloudId} onImport={()=>startImport('builder')} onNew={newResume} dirty={dirty} autoSave={autoSave} onAutoSave={changeAutoSave} savedAt={savedAt} onDeviceSaved={savedDevice} onFindJobs={findJobs} navigate={navigate} />}
-    {route === 'account' && <AccountPanel hasDraft={hasDraft(resume)} onPrepareSignIn={() => prepareAuthHandoff(resume, cloudId)} user={user} onOpenResume={openResume} navigate={navigate} />}
-    {route === 'jobs' && <JobSearch key={importing ? 'import' : 'search'} onImport={()=>startImport('jobs')} onBuildCV={() => navigate('builder')} user={user} onRequestSignIn={requestSignIn} forceUpload={importing} onProfileParsed={importing && importTarget==='builder' ? profile=>{updateResume(resumeFromProfile(profile));setCloudId(null);setImporting(false);navigate('builder');}:undefined} />}
+    {route === 'builder' && !authReady && <main id="main-content" className="container account-page"><p role="status">Checking your account…</p></main>}
+    {route === 'builder' && authReady && !user && <main id="main-content" className="container account-page"><h1>Sign in to create or optimise your CV</h1><SignInForm navigate={navigate}/></main>}
+    {route === 'builder' && authReady && user && <ResumeBuilder key={editorVersion} resume={resume} onChange={updateResume} user={user} cloudId={cloudId} onCloudSaved={setCloudId} onImport={()=>startImport('builder')} onNew={newResume} dirty={dirty} autoSave={autoSave} onAutoSave={changeAutoSave} savedAt={savedAt} onDeviceSaved={savedDevice} onFindJobs={findJobs} navigate={navigate} />}
+    {route === 'account' && passwordRecovery && <main id="main-content" className="container account-page"><SignInForm recovery onRecovered={()=>setPasswordRecovery(false)} navigate={navigate}/></main>}
+    {route === 'account' && !authReady && <main id="main-content" className="container account-page"><p role="status">Checking your account…</p></main>}
+    {route === 'account' && authReady && !passwordRecovery && <AccountPanel key={user?.id || 'guest'} hasDraft={hasDraft(resume)} onPrepareSignIn={() => prepareAuthHandoff(resume, cloudId)} user={user} onOpenResume={openResume} navigate={navigate} />}
+    {route === 'jobs' && <JobSearch key={importing ? 'import' : 'search'} onImport={()=>startImport('jobs')} onBuildCV={() => navigate('builder')} user={user} onBuildProfile={buildProfile} onRequestSignIn={requestSignIn} forceUpload={importing} onProfileParsed={importing && importTarget==='builder' ? profile=>{updateResume(resumeFromProfile(profile));setCloudId(null);setImporting(false);navigate('builder');}:undefined} />}
     <ProductFooter />
     {signInOpen && <SignInDialog onClose={closeSignIn}/>}
   </div>;

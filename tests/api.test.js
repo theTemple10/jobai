@@ -27,32 +27,35 @@ test('production provider endpoints fail closed without account/quota configurat
   } finally {for(const key of keys) if(previous[key]===undefined) delete process.env[key]; else process.env[key]=previous[key];}
 });
 
-test('authenticated parsing and job search pass identity and atomic quota gates before providers', async()=>{
+test('guest services enforce shared limits without account gates and reuse cached jobs',async()=>{
   const {default:parse}=await import('../api/groq.js');
   const {default:jobs}=await import('../api/jobs.js');
-  const keys=['NODE_ENV','SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','GROQ_API_KEY','JSEARCH_KEY'];
-  const previous=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
-  const previousFetch=globalThis.fetch;
-  const calls=[];
+  const keys=['NODE_ENV','SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','GROQ_API_KEY','JSEARCH_KEY','SERVICE_ACCESS_SECRET','VERCEL'];
+  const previous=Object.fromEntries(keys.map(key=>[key,process.env[key]])),previousFetch=globalThis.fetch;
+  let cache=null,providerJobs=0,providerAI=0,quotaCalls=0,allow=true;
   const response=()=>({status(code){this.code=code;return this;},json(body){this.body=body;return this;}});
-  try {
-    Object.assign(process.env,{NODE_ENV:'production',SUPABASE_URL:'https://test.supabase.co',SUPABASE_PUBLISHABLE_KEY:'test-public',GROQ_API_KEY:'test-groq',JSEARCH_KEY:'test-jobs'});
+  const guest={headers:{'x-vercel-forwarded-for':'203.0.113.5'}};
+  try{
+    Object.assign(process.env,{NODE_ENV:'production',VERCEL:'1',SUPABASE_URL:'https://test.supabase.co',SUPABASE_PUBLISHABLE_KEY:'test-public',GROQ_API_KEY:'test-groq',JSEARCH_KEY:'test-jobs',SERVICE_ACCESS_SECRET:'s'.repeat(64)});
     globalThis.fetch=async(url,options)=>{
-      calls.push(url);
       if(url.endsWith('/auth/v1/user'))return {ok:true,json:async()=>({id:'test-user'})};
-      if(url.includes('/rpc/')){assert.equal(options.headers.Authorization,'Bearer test');return {ok:true,json:async()=>true};}
-      if(url.includes('groq.com'))return {ok:true,json:async()=>({choices:[{message:{content:'{"title":"Developer","skills":["JavaScript"]}'}}]})};
-      if(url.includes('jsearch.'))return {ok:true,json:async()=>({data:[{job_id:'real-provider-shape',job_title:'Developer'}]})};
-      throw new Error('Unexpected URL');
+      if(url.includes('/rpc/')){
+        const body=JSON.parse(options.body);assert.match(body.proof,/^[a-f0-9]{64}$/);
+        if(url.endsWith('consume_public_service_quota')){quotaCalls++;assert.match(body.subject,/^(guest|user):[a-f0-9]{64}$/);return {ok:true,json:async()=>allow};}
+        if(url.endsWith('read_job_search_cache'))return {ok:true,json:async()=>cache};
+        if(url.endsWith('write_job_search_cache')){cache=body.data;return {ok:true,json:async()=>null};}
+      }
+      if(url.includes('groq.com')){providerAI++;return {ok:true,json:async()=>({choices:[{message:{content:'{"title":"Developer"}'}}]})};}
+      if(url.includes('jsearch.')){providerJobs++;return {ok:true,json:async()=>({data:[{job_id:'fixture',job_title:'Developer'}]})};}
+      throw new Error('Unexpected provider call');
     };
-    const unsigned=response();await parse({method:'POST',headers:{},body:{operation:'parse',messages:[{role:'user',content:'Candidate CV facts.'}]}},unsigned);
-    assert.equal(unsigned.code,401);assert.equal(calls.length,0);
-    const cv=response();await parse({method:'POST',headers:{authorization:'Bearer test'},body:{operation:'parse',messages:[{role:'user',content:'Candidate CV facts.'}]}},cv);
-    assert.equal(cv.code,200);assert.equal(calls.length,3);assert.match(calls[1],/consume_service_quota/);assert.match(calls[2],/groq/);
-    const search=response();await jobs({method:'GET',headers:{authorization:'Bearer test'},query:{query:'Developer in Nigeria'}},search);
-    assert.equal(search.code,200);assert.match(calls[4],/consume_service_quota/);assert.match(calls[5],/jsearch/);
-    globalThis.fetch=async url=>({ok:true,json:async()=>url.endsWith('/auth/v1/user')?{id:'test-user'}:false});
-    const limited=response();await jobs({method:'GET',headers:{authorization:'Bearer test'},query:{query:'Developer'}},limited);
-    assert.equal(limited.code,429);
-  } finally {globalThis.fetch=previousFetch;for(const key of keys)if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key];}
+    const parsed=response();await parse({...guest,method:'POST',body:{operation:'parse',messages:[{role:'user',content:'Candidate supplied facts'}]}},parsed);
+    assert.equal(parsed.code,200);assert.equal(providerAI,1);assert.equal(quotaCalls,1);
+    const accountOnly=response();await parse({...guest,method:'POST',body:{operation:'rewrite',text:'Candidate summary'}},accountOnly);assert.equal(accountOnly.code,401);assert.equal(providerAI,1);
+    for(let i=0;i<2;i++){const result=response();await jobs({...guest,method:'GET',query:{query:'Developer in Nigeria'}},result);assert.equal(result.code,200);}
+    assert.equal(providerJobs,1);assert.equal(quotaCalls,2);
+    allow=false;
+    const limited=response();await parse({...guest,method:'POST',body:{operation:'coverletter',messages:[{role:'user',content:'Candidate and posting facts'}]}},limited);
+    assert.equal(limited.code,429);assert.equal(providerAI,1);
+  }finally{globalThis.fetch=previousFetch;for(const key of keys)if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key];}
 });

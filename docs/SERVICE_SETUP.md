@@ -1,48 +1,57 @@
-# Connect the live services
+# Live services: three-page contract
 
-Guided notes, the section editor, PDF/Word/text downloads, and public remote-job discovery work without an account. Public remote listings come from Remotive; AI assistance, imported-CV analysis, account saving, and extended JSearch listings need the connections below. Having a Supabase project URL alone does not activate these features.
+Guest CV parsing, job search and cover letters do not require an account. The CV builder and saved progress workspace do. See [the product contract](PRODUCT_CONTRACT.md). This guide supersedes the earlier mandatory sign-in/link flow.
 
-## Environment variables
+## Environment
 
-An ignored `.env.local` has been prepared locally with blank credentials. Fill it locally, and add the corresponding values to Vercel → JobAI project → Settings → Environment Variables. Choose the intended Preview/Production environments and redeploy after saving. Do not send secrets in chat or commit them.
+Use Node 22.12+ (Node 22 series). Fill ignored `.env.local` and the corresponding Vercel Preview/Production settings; redeploy after saving. Never post secrets or commit that file.
 
-| Variable | Where to get it | Use |
-| --- | --- | --- |
-| `GROQ_API_KEY` | Groq console → API Keys | Server-only CV analysis, draft wording, cover letters |
-| `JSEARCH_KEY` | The JSearch API provider account (RapidAPI) | Server-only live job listings; requires an active subscription/plan |
-| `VITE_SUPABASE_URL` and `SUPABASE_URL` | Supabase project URL | Both use `https://qxhkrepvoqnsxcofarno.supabase.co` |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_PUBLISHABLE_KEY` | Supabase → Project Settings → API Keys → publishable key | Both use the same public project key; never use a secret/service-role key |
-| `VITE_PUBLIC_SITE_URL` | Your production website URL | Current example uses `https://jobai-orpin.vercel.app`; update if the domain changes |
-| `VITE_SUPPORT_EMAIL` | A monitored support inbox | Optional private support contact shown in the app |
+| Variable | Source / purpose |
+| --- | --- |
+| `GROQ_API_KEY` | Groq console API key; server-only analysis/writing |
+| `JSEARCH_KEY` | RapidAPI JSearch subscription API key; server-only listings |
+| `SUPABASE_URL`, `VITE_SUPABASE_URL` | Same Supabase project URL |
+| `SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Same public project publishable key, never service-role |
+| `SERVICE_ACCESS_SECRET` | Generated server-only capability for shared quotas/cache; minimum 32 characters |
+| `VITE_PUBLIC_SITE_URL` | Production HTTPS origin, currently `https://jobai-orpin.vercel.app` |
+| `VITE_SUPPORT_EMAIL` | Optional monitored private support inbox |
 
-The server model defaults to `openai/gpt-oss-120b`. `GROQ_VISION_MODEL` is optional and must name a currently available vision model before image CV uploads can be analysed. Regular text PDFs and Word documents do not require vision. EmailJS settings are optional for emailed copies.
+Never prefix provider keys or `SERVICE_ACCESS_SECRET` with `VITE_`. The browser needs only public configuration. No service-role key or database password is required by the application.
 
-No database password, Supabase secret key, or service-role key is required by this application. Never prefix a Groq/JSearch secret with `VITE_`: those values become public browser code.
+Text defaults to `openai/gpt-oss-120b`; vision defaults to `qwen/qwen3.8-27b`. Overrides `GROQ_TEXT_MODEL` / `GROQ_VISION_MODEL` must identify models available to the actual Groq account. Images require vision; text PDF/DOCX extraction runs in the browser. Optional EmailJS copies use the public `VITE_EMAILJS_*` settings.
 
-Run `npm run check:config` with Node 22 to check variable presence without revealing values. This command does not validate credentials or inspect the remote database. Vite alone does not run `/api/*`; use `vercel dev` for live local serverless testing, or a Vercel preview.
+`npm run check:config` checks presence only, never prints values and does not establish live acceptance. Vite alone serves UI, not Vercel API functions; use `vercel dev` or a preview for live APIs.
 
-## Supabase database and email sign-in
+## Database and server capability
 
-1. Open the project's SQL Editor. Apply `supabase/migrations/202610090001_workspace.sql` once on a fresh project. It creates the resumes table, row ownership policies, and per-user provider quotas. If the objects already exist, inspect the migration history before rerunning: this migration deliberately does not hide an existing conflicting schema.
-2. In Authentication → URL Configuration, set **Site URL** to `https://jobai-orpin.vercel.app`. Add **Redirect URLs**: `https://jobai-orpin.vercel.app/account` and your intended preview's exact `/account` URL. Add local `/account` redirects only when testing locally. The application requests `/account` on the current origin. If the confirmation email still goes to localhost, inspect both the Confirm signup and Magic Link email templates: their sign-in anchor should normally use `{{ .ConfirmationURL }}`, rather than a hardcoded localhost link or `{{ .SiteURL }}` alone. Request a new email after correcting these settings; old emails retain their original links. These are Supabase dashboard settings, not `.env.local` values.
-3. Keep the normal email-link templates with their `{{ .ConfirmationURL }}` links. The app asks users to retain the CV tab, open the email link in the same browser, and return; SDK session synchronization resumes their pending request. Optional code verification is available via “My email has a sign-in code.” To enable that alternative, add `Your sign-in code: {{ .Token }}` to both Magic Link and Confirm signup templates, retaining their links. This optional template edit is not required for link sign-in. Enable the email provider. Configure production email delivery/SMTP and check the project's actual sending limits. An accepted sign-in request does not prove the email arrived.
-4. Set the environment variables, redeploy, and test with two separate users. Each should be able to create, reopen, update, and delete only their own CVs. An unsigned request to a paid provider must be rejected; a signed request must pass the quota RPC before calling the provider. Public remote discovery uses `/api/public-jobs`, requires neither account nor provider key, and must never invoke the paid endpoints.
+Notify the owner before database or security changes, explaining scope, risks and recovery. On a fresh project, apply in order:
 
-## Public remote-job discovery
+1. `supabase/migrations/202610090001_workspace.sql` — CV ownership and original account quota support.
+2. `supabase/migrations/20261029133101_guest_services_and_applications.sql` — owned application history and private guest quota/cache/settings tables. Already applied to the current project on October 29, version `20261029133101`; do not rerun blindly.
+3. Run `node scripts/configure-service-access.mjs` locally. It creates a secret only if absent/invalid, and writes hash-only SQL to `/tmp/roleaide-service-verifier.sql`. Apply that verifier SQL using an administrative connection, then set the same local secret in Vercel Preview and Production. Neither the secret nor its derived proof belongs in browser code.
 
-`/api/public-jobs` fetches the fixed Remotive public feed. The browser filters it by role/company text and stated location. It displays attribution, the source's original country restriction, and links back to the Remotive listing. Results are delayed by at least 24 hours, have limited coverage, and are not proof of eligibility. This feed is not a replacement for broad local/on-site JSearch coverage.
+The RPCs accept the publishable key but require a derived server proof; missing/wrong proof fails closed. Private tables intentionally have RLS enabled with no client policies or direct client grants. Application-history policies restrict CRUD to the record owner; CV policies remain unchanged.
 
-The fixed endpoint uses a six-hour CDN cache and a six-hour per-process cache, coalescing simultaneous refreshes within a process. No JSearch/Groq requests or signups are involved. Remotive advises no more than four feed fetches per day; per-process and regional CDN caching do not guarantee a global fetch ceiling across cold starts/regions. Verify deployed caching and request volume; use a single scheduled/shared feed cache before scaling traffic. Source guidance: [Remotive API documentation](https://github.com/remotive-com/remote-jobs-api).
+For a necessary rotation, notify the owner, run the helper with `--rotate`, apply its replacement verifier, update both Vercel environments and redeploy together. An intermediate mismatch makes the new provider routes unavailable. Never recover by restoring an exposed secret. Keep the previous source deployment available during rollout; its older provider flow does not depend on this verifier.
 
-See [Supabase redirect URL guidance](https://supabase.com/docs/guides/auth/redirect-urls) and [email-link authentication](https://supabase.com/docs/guides/auth/auth-email-passwordless). Check current provider plans and limits in your accounts before public launch.
+Initial limits: guest AI 5/hour, authenticated AI 30/hour; AI global 300/day and 3,000/month. Uncached guest jobs 10/hour, authenticated jobs 40/hour; JSearch global 15/day and 90/month. Six-hour shared job cache hits consume no JSearch requests. These are conservative pilot limits, not a promise that a provider plan is free or sufficient. Adjust only after checking actual subscription and usage. Visitor identifiers are keyed hashes, not raw IP addresses; shared-network users can share a guest allowance.
 
-## Live acceptance still required
+## Standard account entry
 
-- Receive a sign-in email and return to the intended preview/production account page.
-- Create and edit a CV, save it to the account, reload, reopen it, then delete it.
-- Verify user isolation with a second account and server authorization/quota failures.
-- Try AI drafting and existing PDF/DOCX import with real representative CVs; review factual accuracy and provider errors.
-- Search for real jobs, open a valid employer link, prepare a cover letter, and confirm submission manually.
-- Test mail delivery and unusual export lengths/languages on supported devices.
+Enable Supabase Email authentication with password signup/login. Set Site URL to the production origin, and allow its exact `/account` redirect plus intended preview/local callback URLs. Keep `{{ .ConfirmationURL }}` in Confirm signup and Reset password templates. No `.Token` template edit is needed by the current flow.
 
-Automated provider tests use mocks; they do not establish live Groq quality, JSearch coverage, email delivery, or deployed database permissions. Local database tests verify the checked-in migration separately.
+First-time users confirm their email, then sign in with email/password on any device. Existing magic-link-only users can set a password through Forgot password. Confirmation on a phone does not create a PC session. Verify real email delivery and SMTP limits.
+
+Google entry appears only if the actual public Auth settings report Google enabled. Configure Google credentials and allowed callback/origins in the provider dashboards before claiming Google is operational. Do not publish placeholder credentials or a nonfunctional button.
+
+## Public remote feed
+
+`/api/public-jobs` remains an optional Remotive alternative with attribution, stated country restrictions and a six-hour process/CDN cache. Listings are delayed at least 24 hours and eligibility must be checked. Per-process caching does not guarantee a worldwide fetch ceiling across cold starts/regions; use shared feed caching before scaling. [Remotive source guidance](https://github.com/remotive-com/remote-jobs-api).
+
+## Release acceptance
+
+Distinguish local source, published branch, protected preview, and verified production. Require lint, Node/database tests, production build, public-page checks, browser flows and built-asset checks. Mocked tests establish behavior, not provider quality or email delivery.
+
+Use a fictional CV for real guest text/image/PDF → preferences → jobs → cover-letter copy/download → original listing checks. Verify cache hits and denied proof/quota paths. Test email/password signup, confirmation, login and recovery with a real owner-controlled email. Verify two-account CV/application isolation, saved versions, status edits and deletion. Review actual provider charges/allowances.
+
+Rollback source by reverting the release/restoring the previous Vercel deployment. Leave new tables protected and preserve records created after release; do not drop user history to undo UI changes.

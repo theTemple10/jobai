@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a broken user journey
+title: "[Bug] "
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      options:
+        - Guest jobs and applications
+        - CV builder
+        - Workspace
+        - Sign-up or sign-in
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps and observed result
+      description: Include device/browser and the page. Never attach credentials, email sign-in links or a private CV.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true

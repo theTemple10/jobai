@@ -1,65 +1,66 @@
 import {useEffect,useRef,useState} from 'react';
-import {supabase} from './supabase.js';
+import {supabase,googleSignInAvailable} from './supabase.js';
 
-export default function SignInForm({hasDraft=false,onPrepareSignIn=()=>{},navigate,inline=false}) {
+export default function SignInForm({navigate,inline=false,recovery=false,onRecovered=()=>{}}) {
+  const [mode,setMode]=useState('signin');
   const [email,setEmail]=useState('');
-  const [sentTo,setSentTo]=useState('');
-  const [code,setCode]=useState('');
-  const [codeEntry,setCodeEntry]=useState(false);
-  const [busy,setBusy]=useState('');
+  const [password,setPassword]=useState('');
+  const [confirmation,setConfirmation]=useState('');
+  const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
-  const [retryAt,setRetryAt]=useState(0);
-  const [now,setNow]=useState(Date.now);
-  const [recoveryConsent,setRecoveryConsent]=useState(false);
+  const [message,setMessage]=useState('');
+  const [canResend,setCanResend]=useState(false);
+  const [google,setGoogle]=useState(false);
   const feedback=useRef(null);
-  const seconds=Math.max(0,Math.ceil((retryAt-now)/1000));
-  useEffect(()=>{
-    if (!retryAt) return;
-    const timer=setInterval(()=>setNow(Date.now()),1000);
-    return ()=>clearInterval(timer);
-  },[retryAt]);
-  useEffect(()=>{if(error || sentTo){feedback.current?.focus();feedback.current?.scrollIntoView({block:'nearest'});}},[error,sentTo]);
-
-  async function send(event) {
-    event.preventDefault();if(busy || seconds) return;
-    setBusy('send');setError('');
-    try {
-      if(hasDraft && recoveryConsent) onPrepareSignIn();
-      const address=email.trim();
-      const {error}=await supabase.auth.signInWithOtp({email:address,options:{emailRedirectTo:`${window.location.origin}/account`}});
-      if(error) throw error;
-      setSentTo(address);setCode('');setNow(Date.now());setRetryAt(Date.now()+60000);
-    } catch(err){setError(err.message || 'We could not send your email. Please try again.');}
-    finally{setBusy('');}
+  const activeMode=recovery?'recover':mode;
+  useEffect(()=>{let active=true;googleSignInAvailable().then(value=>{if(active)setGoogle(value);});return()=>{active=false;};},[]);
+  useEffect(()=>{if(error || message){feedback.current?.focus();feedback.current?.scrollIntoView({block:'nearest'});}},[error,message]);
+  function choose(next){setMode(next);setError('');setMessage('');setCanResend(false);setPassword('');setConfirmation('');}
+  async function submit(event){
+    event.preventDefault();if(busy)return;setBusy(true);setError('');setMessage('');
+    try{
+      if(['signup','recover'].includes(activeMode) && password!==confirmation)throw new Error('The passwords do not match.');
+      let result;
+      if(activeMode==='signin')result=await supabase.auth.signInWithPassword({email:email.trim(),password});
+      else if(activeMode==='signup'){
+        result=await supabase.auth.signUp({email:email.trim(),password,options:{emailRedirectTo:`${window.location.origin}/account`}});
+        if(!result.error && !result.data.session){setCanResend(true);setMessage('Check your email to confirm your account. Then sign in here with your email and password, on any device.');setMode('signin');}
+      }else if(activeMode==='forgot'){
+        result=await supabase.auth.resetPasswordForEmail(email.trim(),{redirectTo:`${window.location.origin}/account`});
+        if(!result.error)setMessage('If an account exists for that address, a password reset email has been requested. Open it to choose a new password.');
+      }else{
+        result=await supabase.auth.updateUser({password});
+        if(!result.error){onRecovered();setMode('signin');setMessage('Your password has been updated.');}
+      }
+      if(result.error)throw result.error;
+      setPassword('');setConfirmation('');
+    }catch(err){setError(err.message || 'Account access could not be completed. Please try again.');if(err.code==='email_not_confirmed')setCanResend(true);}
+    finally{setBusy(false);}
   }
-  async function verify(event) {
-    event.preventDefault();if(busy) return;
-    setBusy('verify');setError('');
-    try {
-      const {data,error}=await supabase.auth.verifyOtp({email:sentTo,token:code.trim(),type:'email'});
-      if(error) throw error;
-      if(!data.session) throw new Error('Sign-in did not finish. Request a new email and try again.');
-    } catch(err){setError(err.message || 'This code could not be verified. Use the newest email or request another.');}
-    finally{setBusy('');}
+  async function resend(){setBusy(true);setError('');try{const {error}=await supabase.auth.resend({type:'signup',email:email.trim(),options:{emailRedirectTo:`${window.location.origin}/account`}});if(error)throw error;setMessage('A fresh confirmation email was requested. Confirm it, then sign in with your password.');setCanResend(false);}catch(err){setError(err.message);}finally{setBusy(false);}}
+  async function signInGoogle(){
+    setBusy(true);setError('');
+    try{
+      const target=['/builder','/jobs','/account'].includes(window.location.pathname)?window.location.pathname:'/account';
+      try{sessionStorage.setItem('roleaide_auth_return',target);}catch{ /* Account sign-in remains available without return-route storage. */ }
+      const {error}=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:`${window.location.origin}/account`}});
+      if(error)throw error;
+    }catch(err){setError(err.message || 'Google sign-in could not be started.');setBusy(false);}
   }
-  if(!supabase) return <section className="account-card"><h2>Sign-in is unavailable</h2><p>Account access has not been configured for this version. Your selected CV stays in this tab; close this message and try again after setup.</p></section>;
-  return <section className="account-card" aria-label="Email sign-in">
-    <h2>{inline?'Sign in to continue':'Sign in to your workspace'}</h2>
-    <p>{inline?'Your current work stays in this tab. Complete sign-in, then we’ll continue where you left off.':'Use your email to create an account or return to your workspace. No password needed.'}</p>
-    <div ref={feedback} tabIndex={-1}>
-      {error && <p className="notice error" role="alert">{error}</p>}
-      {sentTo && <div className="notice" role="status"><strong>Check your inbox</strong><p>A sign-in email was requested for <strong>{sentTo}</strong>. Check spam too. Open the newest email’s sign-in link in the same browser, keeping this tab open. Then return here; we’ll continue automatically when this browser receives your session.</p><p>Keep this tab open so your selected CV and edits stay available.</p>{!inline && <button className="button secondary" onClick={()=>navigate('builder')}>Continue building my CV →</button>}</div>}
-    </div>
-    {sentTo && !codeEntry && <button className="text-link" onClick={()=>setCodeEntry(true)}>My email has a sign-in code</button>}
-    {sentTo && codeEntry && <form onSubmit={verify} aria-busy={busy==='verify'}>
-      <label className="field">Email sign-in code<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6,10}" minLength={6} maxLength={10} required value={code} onChange={event=>setCode(event.target.value.replace(/\D/g,''))}/></label>
-      <button className="button primary" disabled={Boolean(busy) || code.length<6}>{busy==='verify'?'Checking your code…':'Verify code and continue →'}</button>
-    </form>}
-    <form onSubmit={send} aria-busy={busy==='send'}>
-      <label className="field">Email address<input type="email" autoComplete="email" required maxLength={254} value={email} onChange={event=>setEmail(event.target.value)} placeholder="you@example.com"/></label>
-      {hasDraft && <label className="consent"><input type="checkbox" checked={recoveryConsent} onChange={event=>setRecoveryConsent(event.target.checked)}/>Keep a recovery copy of this CV on this device while I sign in. It is removed when the app restores it.</label>}
-      <button className="button primary" disabled={Boolean(busy) || seconds>0}>{busy==='send'?'Sending your email…':seconds?`Request another link in ${seconds}s`:sentTo?'Email me another sign-in link →':'Email me a sign-in link →'}</button>
+  if(!supabase)return <section className="account-card"><h2>Account access is unavailable</h2><p>Please try again later. You can still use the guest job-search and cover-letter tools.</p></section>;
+  const title={signin:'Sign in',signup:'Create your account',forgot:'Reset your password',recover:'Choose a new password'}[activeMode];
+  return <section className="account-card" aria-label="Account access"><h2>{title}</h2><p>Use an account for the CV builder and to keep your application history. Job search and cover letters work without signing in.</p>
+    {!recovery && <div className="button-row"><button className="button secondary" disabled={busy} aria-pressed={mode==='signin'} onClick={()=>choose('signin')}>Sign in</button><button className="button secondary" disabled={busy} aria-pressed={mode==='signup'} onClick={()=>choose('signup')}>Sign up</button></div>}
+    <div ref={feedback} tabIndex={-1}>{error && <p className="notice error" role="alert">{error}</p>}{message && <p className="notice" role="status">{message}</p>}</div>
+    <form onSubmit={submit} aria-busy={busy}>
+      {activeMode!=='recover' && <label className="field">Email address<input type="email" autoComplete="email" required maxLength={254} value={email} onChange={event=>setEmail(event.target.value)}/></label>}
+      {activeMode!=='forgot' && <label className="field">Password<input aria-label="Password" type="password" autoComplete={activeMode==='signin'?'current-password':'new-password'} required minLength={activeMode==='signin'?1:8} maxLength={256} value={password} onChange={event=>setPassword(event.target.value)}/>{activeMode!=='signin' && <span className="form-help">Use at least 8 characters. A longer unique password is better.</span>}</label>}
+      {['signup','recover'].includes(activeMode) && <label className="field">Confirm password<input type="password" autoComplete="new-password" required value={confirmation} onChange={event=>setConfirmation(event.target.value)}/></label>}
+      <button className="button primary" disabled={busy}>{busy?'Please wait…':{signin:'Sign in and continue →',signup:'Create account →',forgot:'Send password reset email',recover:'Save new password'}[activeMode]}</button>
     </form>
-    <p className="form-help">Public remote listings and CV downloads work without an account. Analysis and extended job search use your account’s service allowance.</p>
+    {canResend && <button className="text-link" disabled={busy} onClick={resend}>Resend confirmation email</button>}
+    {activeMode==='signin' && <button className="text-link" disabled={busy} onClick={()=>choose('forgot')}>Forgot password?</button>}
+    {google && !inline && !recovery && <button className="button secondary" disabled={busy} onClick={signInGoogle}>Continue with Google</button>}
+    {!inline && navigate && <p><button className="text-link" onClick={()=>navigate('jobs')}>Continue to guest job search →</button></p>}
   </section>;
 }
