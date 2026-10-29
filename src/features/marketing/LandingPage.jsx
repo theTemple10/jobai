@@ -31,7 +31,7 @@ export default function LandingPage({ navigate, onImport }) {
         <p className="hero-intro">Turn your existing CV into a focused job search.</p>
         <p>Upload your CV, review the extracted profile, then discover related jobs ranked by the skills and role information in each posting. {BRAND.name} shows the matching evidence so you can decide what to pursue.</p>
         <div className="hero-actions"><button className="button primary" onClick={onImport}>Upload my CV and find jobs <span>→</span></button><button className="button secondary" onClick={() => navigate('jobs')}>Explore jobs <span>↗</span></button><button className="text-link" onClick={() => navigate('builder')}>Build my CV</button></div>
-        <p className="hero-footnote">Browse public remote jobs freely · Sign in for CV analysis and extended search</p>
+        <p className="hero-footnote">Browse public remote jobs freely · No sign-in needed for analysis, search or cover letters</p>
       </div>
       <PaperCompanion />
     </section>

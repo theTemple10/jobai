@@ -4,6 +4,18 @@ import { readFile } from 'node:fs/promises';
 import { unzipSync, strFromU8 } from 'fflate';
 import { buildRequest } from '../../api/groq.js';
 
+
+const testUser={id:'11111111-1111-4111-8111-111111111111',email:'ada@example.com',aud:'authenticated',role:'authenticated',app_metadata:{},user_metadata:{},created_at:'2026-10-29T00:00:00Z'};
+const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+function testSession(){return {access_token:`${encode({alg:'HS256',typ:'JWT'})}.${encode({sub:testUser.id,exp:Math.floor(Date.now()/1000)+3600})}.test`,refresh_token:'fixture-refresh',expires_at:Math.floor(Date.now()/1000)+3600,expires_in:3600,token_type:'bearer',user:testUser};}
+const guestTests=['guest','first visit','job provider failure','unexpected saved activity','returning visitors','pasted CV'];
+test.beforeEach(async({page},info)=>{
+  await page.route('**/auth/v1/settings',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({external:{email:true,google:false}})}));
+  await page.route('**/rest/v1/application_activity?**',route=>route.fulfill({contentType:'application/json',body:'[]'}));
+  await page.route('**/rest/v1/resumes?**',route=>route.fulfill({contentType:'application/json',body:'[]'}));
+  if(!guestTests.some(prefix=>info.title.startsWith(prefix)))await page.addInitScript(session=>localStorage.setItem('sb-roleaide-test-auth-token',JSON.stringify(session)),testSession());
+});
+
 test('landing and builder fit mobile widths and respect reduced motion', async ({ page }) => {
   for (const width of [320,375,768,1440]) {
     await page.setViewportSize({width,height:900});await page.goto('/');
@@ -33,20 +45,6 @@ test('existing Word CV imports into editable builder fields',async({page})=>{
   await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
   await expect(page.getByLabel('Full name')).toHaveValue('Ada Obi');
   await expect(page.getByLabel('Target role',{exact:true})).toHaveValue('Frontend Developer');
-});
-
-test('opened listing becomes submitted only after user confirmation',async({page,context})=>{
-  await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({name:'Ada',title:'Developer',skills:['Python'],jobTitles:['Developer']}));});
-  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Python Developer',employer_name:'Community Labs',job_description:'Build Python tools for community services.',job_apply_link:'https://example.com/jobs/role-1'}]})}));
-  await context.route('https://example.com/**',route=>route.fulfill({body:'Application page'}));
-  await page.goto('/#/jobs');await page.getByRole('button',{name:'View Python Developer at Community Labs'}).click();
-  await page.getByRole('button',{name:'Apply on'}).click();
-  await expect(page.getByText('↗ Opened',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Application activity'}).click();
-  await expect(page.getByRole('dialog')).toBeVisible();await expect(page.getByText('Opened listing',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'I submitted this application'}).click();
-  await expect(page.getByText('Submitted (confirmed by you)',{exact:true})).toBeVisible();
-  await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
 test('a first CV exports selectable PDF and editable DOCX from reviewed facts', async ({page}) => {
@@ -82,7 +80,7 @@ test('draft saving is explicit, recoverable, and removable',async({page})=>{
 
 test('job provider failure is a persistent error without fictional listings',async({page})=>{
   await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({name:'Ada',title:'Developer',skills:['Python'],jobTitles:['Developer']}));});
-  await page.route('**/api/public-jobs',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'The job provider is unavailable.'})}));
+  await page.route('**/api/jobs?**',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'The job provider is unavailable.'})}));
   await page.goto('/#/jobs');await expect(page.getByRole('alert')).toContainText('The job provider is unavailable');
   await expect(page.getByText('TechCorp')).toHaveCount(0);await expect(page.getByText('GlobalBank')).toHaveCount(0);
 });
@@ -129,20 +127,10 @@ test('automatic device saving is explicit and preserves later edits',async({page
 });
 
 test('first visit offers search without a CV and submits one bounded query',async({page})=>{
-  const requests=[];await page.route('**/api/public-jobs',route=>{requests.push(route.request().url());return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})});});
+  const requests=[];await page.route('**/api/jobs?**',route=>{requests.push(route.request().url());return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})});});
   await page.goto('/jobs');await expect(page.getByLabel('Job title, skill, or company')).toBeVisible();expect(requests).toHaveLength(0);
   await page.getByLabel('Job title, skill, or company').fill('Frontend developer');await page.getByLabel('Job search location').selectOption('Remote');await page.getByRole('button',{name:'Find jobs',exact:true}).click();
-  await expect(page.getByText('No listings came back this time.')).toBeVisible();expect(requests).toHaveLength(1);expect(new URL(requests[0]).pathname).toBe('/api/public-jobs');
-});
-
-test('restored cover letters retain preparation actions and project evidence',async({page})=>{
-  await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({name:'Ada',title:'Developer',skills:['Python'],jobTitles:['Developer'],projects:[{name:'Community tool',highlights:['Built accessible search']}]}));localStorage.setItem('jobai_letter_role-1',JSON.stringify('Dear Hiring Manager, I build Python tools.'));});
-  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Developer',employer_name:'Community Labs',job_description:'Python development'}]})}));
-  await page.route('**/api/groq',route=>{const payload=route.request().postDataJSON();expect(payload.messages[0].content).toContain('Built accessible search');return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:'A reviewed letter.'}}]})});});
-  await page.goto('/jobs');await page.getByRole('button',{name:'View Developer at Community Labs'}).click();
-  await expect(page.getByRole('button',{name:'Open listing & copy letter',exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Regenerate',exact:false}).click();await page.getByLabel('Editable cover letter').waitFor();
-  await expect(page.getByLabel('Editable cover letter')).toHaveValue('A reviewed letter.');
+  await expect(page.getByText('No listings came back this time.')).toBeVisible();expect(requests).toHaveLength(1);expect(new URL(requests[0]).searchParams.get('remote_jobs_only')).toBe('true');
 });
 
 test('returning visitors can deliberately import a different CV',async({page})=>{
@@ -153,7 +141,7 @@ test('returning visitors can deliberately import a different CV',async({page})=>
 
 test('job cards and detail actions fit narrow screens in both themes',async({page})=>{
   await page.addInitScript(()=>{localStorage.setItem('jobai_step','3');localStorage.setItem('jobai_profile',JSON.stringify({title:'Developer',skills:['Python']}));});
-  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Senior Frontend Developer, Accessibility and Design Systems',employer_name:'Community Labs International',job_description:'Build accessible Python tools.\nReview real requirements.',job_city:'Lagos',job_country:'Nigeria',job_is_remote:true}]})}));
+  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'role-1',job_title:'Senior Frontend Developer, Accessibility and Design Systems',employer_name:'Community Labs International',job_description:'Build accessible Python tools.\nReview real requirements.',job_city:'Lagos',job_country:'Nigeria',job_is_remote:true}]})}));
   for(const width of [320,375,768,1440]) {
     await page.setViewportSize({width,height:950});await page.goto('/jobs');await expect(page.getByRole('button',{name:/View Senior Frontend Developer/})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
@@ -217,7 +205,7 @@ async function reachGuidedDraft(page) {
   await page.getByRole('button',{name:'Continue →',exact:true}).click();
 }
 
-test('guided guest journey reaches a real export and job discovery without AI',async({page})=>{
+test('authenticated guided journey reaches a real export and job discovery without AI',async({page})=>{
   let aiRequests=0;page.on('request',request=>{if(request.url().includes('/api/groq')) aiRequests++;});
   await reachGuidedDraft(page);
   await page.getByRole('button',{name:'Arrange my notes →',exact:true}).click();
@@ -227,7 +215,7 @@ test('guided guest journey reaches a real export and job discovery without AI',a
   const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:'Download PDF ↓',exact:true}).click();
   const pdf=await downloaded;const text=execFileSync('pdftotext',[await pdf.path(),'-'],{encoding:'utf8'});
   expect(text).toContain('Ada Obi');expect(text).toContain('keyboard navigation');expect(aiRequests).toBe(0);
-  await page.route('**/api/public-jobs',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})}));
+  await page.route('**/api/jobs?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({data:[]})}));
   await page.getByRole('button',{name:'Explore jobs for this profile →'}).click();
   await expect(page.getByRole('heading',{level:1})).toHaveText('Find your next possibility.');
   await expect(page.getByText('No listings came back this time.')).toBeVisible();
@@ -280,34 +268,6 @@ test('guided choices and draft review fit small screens in both themes',async({p
 });
 
 
-test('sign-in success is prominent, targets this site, and prevents duplicate sends',async({page})=>{
-  let sends=0;
-  await page.route('**/auth/v1/otp**',async route=>{
-    sends++;
-    expect(new URL(route.request().url()).searchParams.get('redirect_to')).toBe('http://127.0.0.1:5173/account');
-    expect(route.request().postDataJSON().email).toBe('ada@example.com');
-    await route.fulfill({contentType:'application/json',body:'{}'});
-  });
-  await page.goto('/account');
-  await page.getByLabel('Email address').fill('ada@example.com');
-  await page.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
-  await expect(page.getByRole('status')).toContainText('Check your inbox');
-  await expect(page.getByRole('status')).toContainText('ada@example.com');
-  await expect(page.getByRole('button',{name:/Request another link in/})).toBeDisabled();
-  expect(sends).toBe(1);
-  expect(await page.evaluate(()=>document.activeElement?.textContent)).toContain('Check your inbox');
-  await expect(page.getByRole('button',{name:'Continue building my CV →'})).toBeVisible();
-});
-
-test('sign-in rejection is visible and permits retry',async({page})=>{
-  await page.route('**/auth/v1/otp**',route=>route.fulfill({status:429,contentType:'application/json',body:JSON.stringify({msg:'Please wait before requesting another email.'})}));
-  await page.goto('/account');await page.getByLabel('Email address').fill('ada@example.com');
-  await page.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('Please wait');
-  await expect(page.getByRole('button',{name:'Email me a sign-in link →',exact:true})).toBeEnabled();
-  await expect(page.getByText('Check your inbox',{exact:true})).toHaveCount(0);
-});
-
 test('pasted CV can be retried after a failure without losing its text',async({page})=>{
   let attempts=0;
   await page.route('**/api/groq',async route=>{
@@ -316,14 +276,14 @@ test('pasted CV can be retried after a failure without losing its text',async({p
     if(attempts===1) return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Please try again.'})});
     return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Obi',title:'Developer',skills:['JavaScript']})}}]})});
   });
-  await page.goto('/builder?mode=editor');await page.getByRole('button',{name:'Import an existing CV'}).click();
+  await page.goto('/');await page.getByRole('button',{name:'Upload my CV and find jobs'}).click();
   await page.getByRole('button',{name:'Paste CV text',exact:true}).click();
   const notes='Ada Obi. Built a community directory using JavaScript for a local volunteer group.';
   await page.getByLabel('Your existing CV or rough notes').fill(notes);
   await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
   await expect(page.getByLabel('Your existing CV or rough notes')).toHaveValue(notes);
   await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
-  await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('Ada Obi');
+  await expect(page.getByLabel('Your name',{exact:true})).toHaveValue('Ada Obi');
 });
 
 
@@ -337,7 +297,7 @@ test('guests see attributed remote listings before account access and can filter
       {job_id:'usa',job_title:'Developer',employer_name:'US Example',job_description:'Build JavaScript tools',job_country:'United States',job_is_remote:true,job_publisher:'Remotive'}
     ]})});
   });
-  await page.goto('/jobs');await page.getByLabel('Job title, skill, or company').fill('Developer');
+  await page.goto('/jobs');await page.getByLabel('Job search source').selectOption('public');await page.getByLabel('Job title, skill, or company').fill('Developer');
   await page.getByLabel('Job search location').selectOption('Nigeria');await page.getByRole('button',{name:'Find jobs',exact:true}).click();
   await expect(page.getByRole('button',{name:'View Developer at Global Example'})).toBeVisible();
   await expect(page.getByRole('button',{name:'View Developer at US Example'})).toHaveCount(0);
@@ -345,90 +305,82 @@ test('guests see attributed remote listings before account access and can filter
   expect(paidRequests).toBe(0);
 });
 
-test('homepage upload resumes after inline code sign-in and reaches ranked jobs without the builder',async({page})=>{
-  const {Document,Packer,Paragraph}=await import('docx');
-  const buffer=await Packer.toBuffer(new Document({sections:[{children:[new Paragraph('Ada Obi. Developer. Built a community directory using JavaScript and SQL. BSc Computer Science.')]}]}));
-  const user={id:'11111111-1111-4111-8111-111111111111',email:'ada@example.com',aud:'authenticated',role:'authenticated',app_metadata:{},user_metadata:{},created_at:new Date().toISOString()};
-  const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
-  const accessToken=`${encode({alg:'HS256',typ:'JWT'})}.${encode({sub:user.id,aud:'authenticated',role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})}.test`;
-  let parseCalls=0;
-  await page.route('**/auth/v1/otp**',route=>route.fulfill({contentType:'application/json',body:'{}'}));
-  await page.route('**/auth/v1/verify',route=>{
-    const token=route.request().postDataJSON().token;
-    if(token==='000000')return route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({msg:'This code has expired. Use the newest email.'})});
-    expect(token).toBe('123456');
-    return route.fulfill({contentType:'application/json',body:JSON.stringify({access_token:accessToken,refresh_token:'test-refresh',token_type:'bearer',expires_in:3600,user})});
-  });
+
+test('guest CV parsing, matching and downloadable cover letters never request sign-in',async({page,context})=>{
+  let authRequests=0;
+  page.on('request',request=>{if(/\/auth\/v1\/(otp|token|verify)/.test(request.url()))authRequests++;});
   await page.route('**/api/groq',route=>{
-    parseCalls++;
-    if(!route.request().headers().authorization)return route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({error:'Please sign in.'})});
-    expect(buildRequest(route.request().postDataJSON()).messages[1].content).toContain('community directory');
-    return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Obi',title:'Developer',skills:['JavaScript','SQL']})}}]})});
+    const payload=route.request().postDataJSON();expect(route.request().headers().authorization).toBeUndefined();
+    const content=payload.operation==='parse'?JSON.stringify({name:'Ada Obi',title:'Developer',skills:['JavaScript'],projects:[{name:'Community directory',highlights:['Built accessible search']}]}):'Dear Hiring Manager, I built accessible search for a community directory using JavaScript. I would welcome the opportunity to contribute.';
+    return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content}}]})});
   });
-  let searches=0;
-  await page.route('**/api/jobs?**',route=>{
-    searches++;expect(route.request().headers().authorization).toBe(`Bearer ${accessToken}`);
-    expect(new URL(route.request().url()).searchParams.get('query')).toBe('Developer');
-    return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[
-      {job_id:'gap',job_title:'Developer',employer_name:'Partial Example',job_description:'JavaScript SQL Python',job_apply_link:'https://example.com/gap'},
-      {job_id:'best',job_title:'Developer',employer_name:'Best Example',job_description:'JavaScript SQL',job_apply_link:'https://example.com/best'}
-    ]})});
-  });
-  await page.goto('/');await page.getByRole('button',{name:'Upload my CV and find jobs'}).click();
-  await page.locator('input[type=file]').setInputFiles({name:'candidate.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',buffer});
-  await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
-  const dialog=page.getByRole('dialog',{name:'Sign in and continue'});await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Email address').fill('ada@example.com');await dialog.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
-  await dialog.getByRole('button',{name:'My email has a sign-in code'}).click();
-  await dialog.getByLabel('Email sign-in code').fill('000000');await dialog.getByRole('button',{name:'Verify code and continue'}).click();
-  await expect(dialog.getByRole('alert')).toContainText('expired');expect(parseCalls).toBe(1);
-  await dialog.getByLabel('Email sign-in code').fill('123456');await dialog.getByRole('button',{name:'Verify code and continue'}).click();
-  await expect(dialog).toHaveCount(0);await expect(page.getByLabel('Your name',{exact:true})).toHaveValue('Ada Obi');
-  expect(parseCalls).toBe(2);expect(searches).toBe(0);expect(new URL(page.url()).pathname).toBe('/jobs');
-  await page.getByRole('button',{name:'Explore jobs for this profile →'}).click();
-  await expect(page.getByRole('button',{name:'View Developer at Best Example'})).toBeVisible();
-  await expect(page.locator('.job-card').first()).toHaveAttribute('aria-label','View Developer at Best Example');
-  await page.getByRole('button',{name:'View Developer at Partial Example'}).click();
-  await page.getByRole('button',{name:'requirements',exact:true}).click();
-  await expect(page.getByRole('region',{name:'Match explanation'})).toContainText('77% text evidence match');
-  await expect(page.getByRole('region',{name:'Match explanation'})).toContainText('python');expect(searches).toBe(1);
-});
-
-
-test('closing inline sign-in retains the selected CV without sending an email',async({page})=>{
-  let emails=0;page.on('request',request=>{if(request.url().includes('/auth/v1/otp'))emails++;});
-  await page.route('**/api/groq',route=>route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({error:'Please sign in.'})}));
-  await page.goto('/');await page.getByRole('button',{name:'Upload my CV and find jobs'}).click();
-  await page.getByRole('button',{name:'Paste CV text',exact:true}).click();
-  const text='Ada Obi. Developer. Built accessible tools with JavaScript and SQL for a community group.';
-  await page.getByLabel('Your existing CV or rough notes').fill(text);await page.getByLabel('I agree to send this CV').check();
-  await page.getByRole('button',{name:'Analyse CV with AI'}).click();
-  await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('Your existing CV or rough notes')).toHaveValue(text);
-  expect(emails).toBe(0);expect(await page.evaluate(()=>document.querySelector('.product-app').inert)).toBe(false);
-});
-
-
-test('email-link sign-in in another tab resumes the original CV without template edits',async({page,context})=>{
-  const user={id:'22222222-2222-4222-8222-222222222222',email:'ada@example.com',aud:'authenticated',role:'authenticated',app_metadata:{},user_metadata:{},created_at:new Date().toISOString()};
-  const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
-  const accessToken=`${encode({alg:'HS256',typ:'JWT'})}.${encode({sub:user.id,aud:'authenticated',role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})}.test`;
-  await context.route('**/auth/v1/otp**',route=>route.fulfill({contentType:'application/json',body:'{}'}));
-  await context.route('**/auth/v1/user',route=>route.fulfill({contentType:'application/json',body:JSON.stringify(user)}));
-  await context.route('**/rest/v1/resumes?**',route=>route.fulfill({contentType:'application/json',body:'[]'}));
-  let requests=0;
-  await context.route('**/api/groq',route=>{
-    requests++;
-    if(!route.request().headers().authorization)return route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({error:'Please sign in.'})});
-    return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Obi',title:'Developer',skills:['SQL']})}}]})});
-  });
+  await page.route('**/api/jobs?**',route=>{expect(route.request().headers().authorization).toBeUndefined();return route.fulfill({contentType:'application/json',body:JSON.stringify({data:[{job_id:'guest-job',job_title:'Developer',employer_name:'Example',job_description:'JavaScript and accessible search',job_apply_link:'https://example.com/guest-job'}]})});});
+  await context.route('https://example.com/**',route=>route.fulfill({body:'Employer application page'}));
   await page.goto('/');await page.getByRole('button',{name:'Upload my CV and find jobs'}).click();await page.getByRole('button',{name:'Paste CV text',exact:true}).click();
-  await page.getByLabel('Your existing CV or rough notes').fill('Ada Obi. Developer. Built SQL reporting tools for a community project with accessible search.');
+  await page.getByLabel('Your existing CV or rough notes').fill('Ada Obi. Developer. Built accessible community directory search using JavaScript and HTML.');
   await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
-  const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();await dialog.getByLabel('Email address').fill('ada@example.com');await dialog.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
-  await expect(dialog.getByRole('status')).toContainText('keeping this tab open');await expect(dialog.getByLabel('Email sign-in code')).toHaveCount(0);
-  const callback=await context.newPage();
-  await callback.goto(`/account#access_token=${accessToken}&refresh_token=test-refresh&token_type=bearer&expires_in=3600&type=magiclink`);
-  await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('Your name',{exact:true})).toHaveValue('Ada Obi');expect(requests).toBe(2);
-  await callback.close();
+  await expect(page.getByLabel('Your name',{exact:true})).toHaveValue('Ada Obi');await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button',{name:'Explore jobs for this profile →'}).click();await page.getByRole('button',{name:'View Developer at Example'}).click();
+  await page.getByRole('button',{name:'Cover Letter',exact:true}).click();await page.getByRole('button',{name:'Generate Now',exact:true}).click();
+  await expect(page.getByLabel('Editable cover letter')).toHaveValue(/community directory/);
+  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Download letter',exact:true}).click();expect((await download).suggestedFilename()).toBe('cover-letter.txt');
+  await page.getByRole('button',{name:'Open listing & copy letter',exact:true}).first().click();expect(authRequests).toBe(0);
+  expect(await page.evaluate(()=>localStorage.getItem('jobai_applications'))).toBeNull();
+});
+
+test('guest builder is protected before editing and email password login opens it',async({page})=>{
+  await page.route('**/auth/v1/token?grant_type=password',route=>{expect(route.request().postDataJSON()).toMatchObject({email:'ada@example.com',password:'test-password-123'});return route.fulfill({contentType:'application/json',body:JSON.stringify(testSession())});});
+  await page.goto('/builder?mode=editor');await expect(page.getByRole('heading',{level:1})).toHaveText('Sign in to create or optimise your CV');await expect(page.getByLabel('Full name',{exact:true})).toHaveCount(0);
+  await page.getByLabel('Email address').fill('ada@example.com');await page.getByLabel('Password',{exact:true}).fill('test-password-123');await page.getByRole('button',{name:'Sign in and continue →'}).click();
+  await expect(page.getByLabel('Full name',{exact:true})).toBeVisible();
+});
+
+test('guest signup confirms account then offers ordinary password sign-in',async({page})=>{
+  await page.route('**/auth/v1/signup**',route=>{const data=route.request().postDataJSON();expect(data.email).toBe('new@example.com');expect(data.password).toBe('test-password-123');return route.fulfill({contentType:'application/json',body:JSON.stringify({user:{...testUser,email:'new@example.com'},session:null})});});
+  await page.goto('/account');await expect(page.getByText(/Sign in to track your progress/)).toBeVisible();await page.getByRole('button',{name:'Sign up',exact:true}).click();
+  await page.getByLabel('Email address').fill('new@example.com');await page.getByLabel('Password',{exact:true}).fill('test-password-123');await page.getByLabel('Confirm password').fill('test-password-123');await page.getByRole('button',{name:'Create account →'}).click();
+  await expect(page.getByRole('status')).toContainText('sign in here with your email and password, on any device');await expect(page.getByRole('button',{name:'Sign in and continue →'})).toBeVisible();
+});
+
+test('workspace shows owned applications and updates reported status',async({page})=>{
+  let status='saved';const row={id:'application-1',user_id:testUser.id,job_key:'job-1',job:{id:'job-1',title:'Developer',company:'Example',location:'Nigeria',evidence:{score:77},applyUrl:'https://example.com/job'},profile:{title:'Developer'},cover_letter:'My saved factual letter.',status,updated_at:'2026-10-29T00:00:00Z'};
+  await page.route('**/rest/v1/application_activity?**',route=>{
+    if(route.request().method()==='PATCH'){status=route.request().postDataJSON().status;return route.fulfill({contentType:'application/json',body:JSON.stringify({...row,status})});}
+    return route.fulfill({contentType:'application/json',body:JSON.stringify([{...row,status}])});
+  });
+  await page.goto('/account');await expect(page.getByRole('heading',{name:'Developer at Example'})).toBeVisible();await expect(page.getByText(/Text evidence match: 77%/)).toBeVisible();
+  await page.getByLabel('Status reported by you').selectOption('submitted');await expect(page.getByLabel('Status reported by you')).toHaveValue('submitted');await expect(page.getByText('submitted by you',{exact:false})).toBeVisible();
+  await page.getByText('Saved cover letter',{exact:true}).click();await expect(page.getByText('My saved factual letter.')).toBeVisible();
+});
+
+test('guest image CV parsing uses vision without an account',async({page})=>{
+  await page.route('**/api/groq',route=>{
+    const body=route.request().postDataJSON();expect(body.useVision).toBe(true);expect(buildRequest(body).messages[1].content.some(part=>part.type==='image_url')).toBe(true);expect(route.request().headers().authorization).toBeUndefined();
+    return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Image',title:'Developer',skills:['SQL']})}}]})});
+  });
+  await page.goto('/');await page.getByRole('button',{name:'Upload my CV and find jobs'}).click();
+  const image=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=300;canvas.height=100;const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,300,100);ctx.fillStyle='black';ctx.fillText('Ada Image. Developer. SQL.',10,50);return canvas.toDataURL('image/png').split(',')[1];});
+  await page.locator('input[type=file]').setInputFiles({name:'image-cv.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')});await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();await expect(page.getByLabel('Your name',{exact:true})).toHaveValue('Ada Image');
+});
+
+test('guest can request password recovery without a login link flow',async({page})=>{
+  let requests=0;await page.route('**/auth/v1/recover**',route=>{requests++;expect(route.request().postDataJSON().email).toBe('ada@example.com');return route.fulfill({contentType:'application/json',body:'{}'});});
+  await page.goto('/account');await page.getByRole('button',{name:'Forgot password?',exact:true}).click();await page.getByLabel('Email address').fill('ada@example.com');await page.getByRole('button',{name:'Send password reset email'}).click();await expect(page.getByRole('status')).toContainText('password reset email');expect(requests).toBe(1);
+});
+
+test('guest Google entry is offered only when the provider is enabled',async({page})=>{
+  await page.route('**/auth/v1/settings',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({external:{email:true,google:true}})}));
+  let launched=false;await page.route('**/auth/v1/authorize?**',route=>{const url=new URL(route.request().url());expect(url.searchParams.get('provider')).toBe('google');expect(url.searchParams.get('redirect_to')).toBe('http://127.0.0.1:5173/account');launched=true;return route.fulfill({contentType:'text/html',body:'Google provider handoff fixture'});});
+  await page.goto('/account');await page.getByRole('button',{name:'Continue with Google'}).click();await expect(page.getByText('Google provider handoff fixture')).toBeVisible();expect(launched).toBe(true);
+});
+
+test('changed account CV saves preserve the previous version',async({page})=>{
+  const existing={id:'cv-old',title:'Developer',document:{name:'Ada Original',title:'Developer'},updated_at:'2026-10-29T00:00:00Z'};let posted=false,patched=false;
+  await page.route('**/rest/v1/resumes**',route=>{
+    if(route.request().method()==='PATCH')patched=true;
+    if(route.request().method()==='POST'){posted=true;return route.fulfill({contentType:'application/json',body:JSON.stringify({...existing,...route.request().postDataJSON(),id:'cv-new'})});}
+    const single=new URL(route.request().url()).searchParams.has('id');return route.fulfill({contentType:'application/json',body:JSON.stringify(single?existing:[existing])});
+  });
+  await page.goto('/account');await page.getByRole('button',{name:'Open CV →',exact:true}).click();await page.getByLabel('Full name',{exact:true}).fill('Ada Updated');await page.getByRole('button',{name:'Save to my account',exact:true}).click();
+  await expect(page.getByText('A new CV version was saved. Your previous version is in your workspace.',{exact:true})).toBeVisible();expect(posted).toBe(true);expect(patched).toBe(false);
 });

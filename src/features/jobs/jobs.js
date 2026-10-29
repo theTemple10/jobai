@@ -5,6 +5,8 @@ export function normalizeProfile(value) {
   const text = key => typeof value[key] === 'string' && value[key] !== 'null' ? value[key].trim() : '';
   const profile = Object.fromEntries(['name', 'email', 'phone', 'location', 'website', 'title', 'summary', 'seniority'].map(key => [key, text(key)]));
   for (const key of ['skills', 'languages', 'certifications', 'jobTitles', 'industries', 'keyStrengths']) profile[key] = strings(key);
+  profile.searchLocation=typeof value.searchLocation==='string'?value.searchLocation.slice(0,80):'All locations';
+  profile.remoteOnly=value.remoteOnly===true;
   profile.experience = Array.isArray(value.experience) ? value.experience.filter(e => e && typeof e === 'object').map(e => ({
     role: typeof e.role === 'string' ? e.role : '', company: typeof e.company === 'string' ? e.company : '',
     duration: typeof e.duration === 'string' ? e.duration : '', highlights: Array.isArray(e.highlights) ? e.highlights.filter(h => typeof h === 'string') : [],

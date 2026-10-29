@@ -239,3 +239,5 @@ main:focus,.job-detail-shell:focus {outline:none;}
 .auth-dialog {background:var(--surface);border:1px solid var(--line);border-radius:12px;width:min(100%,590px);max-height:90dvh;overflow:auto;padding:20px;}
 .auth-dialog .account-card {border:0;padding:15px;}.auth-close {display:block;margin-left:auto;}
 .auth-dialog .field input {min-width:0;}.auth-dialog .notice {overflow-wrap:anywhere;}
+
+.workspace-stats {display:flex;flex-wrap:wrap;gap:20px;background:var(--tint);padding:18px;border-radius:10px;margin-bottom:30px;}.workspace-stats strong{font-size:24px;display:block;}.workspace-applications {margin-top:35px;}.workspace-applications .account-card {max-width:none;margin:18px 0;}.workspace-letter {white-space:pre-wrap;}.account-card .notice {overflow-wrap:anywhere;}.account-card form .button {margin-top:18px;}.account-card .text-link {margin-top:15px;margin-right:15px;}

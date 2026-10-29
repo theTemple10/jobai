@@ -1,6 +1,19 @@
+# Current release work — October 29, 2026
+
+The owner-approved [three-page contract](PRODUCT_CONTRACT.md) supersedes the old builder-deferral and mandatory-link-login decisions below. Current implementation evidence: [guest-first acceptance](GUEST_FIRST_ACCEPTANCE_2026-10-29.md). Prepared issue records: [R001–R006](issues/README.md).
+
+1. Publish/review `feat/three-page-guest-first` after checks. The local implementation is not yet the live site.
+2. The owner confirmed replacing Preview/Production `SERVICE_ACCESS_SECRET` after its database verifier was rotated. Verify the next deployment uses the matching replacement value.
+3. Verify CI and preview; notify the owner before production release. Database migration `20261029133101` is already applied; do not rerun it. Preserve new records on rollback.
+4. On the released site, complete guest PDF/DOCX/image/paste → reviewed profile/preferences → actual jobs → explained match → editable/copyable/downloadable letter → original listing, without sign-in.
+5. Verify real email/password signup, confirmation, login/recovery and account-owned CV versions/application history. Existing link-only accounts can set a password via recovery. Actual public Auth settings report Google disabled; its button is hidden until configured.
+6. Check pilot limits against the actual provider plan, private support/deletion contact and long-document exports. Three observed applicants, honest proposition and a verified demo follow technical acceptance.
+
+## Historical checkpoints (superseded where they conflict)
+
 # RoleAide release work — October 26, 2026
 
-This is the current product list. Local verification, remote deployment and observed user success are separate milestones. The October 19 production audit is historical; do not re-open already-fixed issues without checking current source.
+Historical checkpoints follow; the October 29 contract below is authoritative. Local verification, remote deployment and observed user success are separate milestones. The October 19 production audit is historical; do not re-open already-fixed issues without checking current source.
 
 October 27 update: local public remote-job discovery, prominent email-link feedback and pasted CV intake are documented in `UX_ACCEPTANCE_2026-10-27.md`. These changes still need deployment. Production's account configuration gate returned 401 after the owner's fix; actual sign-in currently redirects to localhost according to the owner. Correct Supabase URL configuration/email templates and request a fresh link, then verify delivery and return to `/account`. Dictation remains an idea, not an implemented feature.
 

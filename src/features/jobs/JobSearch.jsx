@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import {listApplications,saveApplication} from '../account/supabase.js';
+import { useState, useEffect, useRef } from "react";
 import { normalizeProfile } from "./jobs.js";
 import { requestAI } from "../../shared/lib/ai.js";
 import JobExplorer from "./JobExplorer.jsx";
-import { readStored, readActivity, readJobProfile } from "../../shared/lib/storage.js";
+import { readStored, readJobProfile } from "../../shared/lib/storage.js";
 import { extractPdfText, extractDocxText } from "../resume/parseDocument.js";
 import { isModuleLoadError, MODULE_LOAD_MESSAGE } from '../../shared/lib/moduleLoading.js';
 
@@ -286,14 +287,14 @@ function UploadStep({ onNext, initialData, onBuildCV }) {
       >
         Analyse CV with AI →
       </button>
-      <p className="form-help">AI import requires sign-in. Your text stays in this tab if analysis fails.</p>
+      <p className="form-help">No sign-in needed for CV analysis or job search. Your text stays in this tab if analysis fails.</p>
       {onBuildCV && <button className="text-link" onClick={onBuildCV}>Build from short answers without signing in →</button>}
     </div>
   );
 }
 
 // ─── STEP 1: PARSING ──────────────────────────────────────────────────────────
-function ParsingStep({ file, prompt, onDone, onAuthenticationRequired }) {
+function ParsingStep({ file, prompt, onDone }) {
   const [status, setStatus] = useState("Reading your CV…");
   const [progress, setProgress] = useState(0);
   useEffect(() => {
@@ -361,14 +362,13 @@ Additional context: ${prompt || "None provided"}`;
         resultTimer = setTimeout(() => {if (active) onDone(parsed);}, 600);
       } catch (err) {
         if (!active) return;
-        if(err.status===401 && onAuthenticationRequired){onAuthenticationRequired();return;}
         showToast(isModuleLoadError(err) ? MODULE_LOAD_MESSAGE : err.message || "Analysis failed. Please try again.", "error");
         resultTimer = setTimeout(() => {if (active) onDone(null);}, 1000);
       }
     })();
 
     return () => {active = false; controller.abort(); clearTimeout(resultTimer);};
-  }, [file, prompt, onDone, onAuthenticationRequired]);
+  }, [file, prompt, onDone]);
 
   return (
     <div className="max-w-lg mx-auto text-center py-16">
@@ -409,7 +409,7 @@ const Tag = ({ label, onRemove }) => (
   );
 
 
-function ProfileStep({ profile, onNext }) {
+function ProfileStep({ profile, onNext, onBuildCV }) {
   const [p, setP] = useState(profile);
   const [newSkill,setNewSkill]=useState('');
 
@@ -516,6 +516,8 @@ function ProfileStep({ profile, onNext }) {
         </div>
       )}
 
+      {onBuildCV && <button className="button secondary" onClick={()=>onBuildCV(p)}>Optimise this CV in the builder →</button>}
+      <div className="account-card"><h3>Your job preferences</h3><label className="field">Preferred job location<select value={p.searchLocation || 'All locations'} onChange={event=>setP({...p,searchLocation:event.target.value})}>{['All locations','Nigeria','United States','United Kingdom','Canada','Australia','Germany','Netherlands','UAE','South Africa','Remote'].map(place=><option key={place}>{place}</option>)}</select></label><label className="consent"><input type="checkbox" checked={Boolean(p.remoteOnly)} onChange={event=>setP({...p,remoteOnly:event.target.checked})}/>Search remote roles only</label><p className="form-help">Remote listings can still restrict eligible countries. Check the employer’s requirements.</p></div>
       {/* Job Titles to Search */}
       <div className="rounded-2xl p-5 bg-indigo-400/5 border border-indigo-400/15 mb-6">
         <div className="text-indigo-400 text-xs font-mono uppercase tracking-widest mb-3">Will Search For</div>
@@ -545,16 +547,16 @@ function ProfileStep({ profile, onNext }) {
 
 // ─── STEP 3: JOBS ─────────────────────────────────────────────────────────────
 // ─── JOB DETAIL & APPLY ───────────────────────────────────────────────────────
-function JobDetail({ job, profile, onBack, onApply, applied }) {
+function JobDetail({ job, profile, onBack, onApply, applied, user, onTrack }) {
   const [tab, setTab] = useState("details");
-  const [coverLetter, setCoverLetter] = useState(() => load(`jobai_letter_${job.id}`, ""));
+  const [coverLetter,setCoverLetter]=useState('');
   const [generating, setGenerating] = useState(false);
   const [letterError, setLetterError] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailCopy, setEmailCopy] = useState(false);
   const reviewing = Boolean(coverLetter.trim());
 
-  useEffect(() => {save(`jobai_letter_${job.id}`, coverLetter);}, [job.id, coverLetter]);
+
 
   const board = JOB_BOARDS.find((b) => b.id === job.board) || JOB_BOARDS.find((b) => b.id === "other");
   const boardName = job.boardLabel || board.name;
@@ -563,7 +565,7 @@ function JobDetail({ job, profile, onBack, onApply, applied }) {
 
   const generateCoverLetter = async () => {
     setLetterError('');
-    if (!profile.name && !profile.experience?.length && !profile.projects?.length) {setLetterError('Add your experience in the CV builder before asking for a letter. We need your facts to write from.'); return;}
+    if (!profile.name && !profile.experience?.length && !profile.projects?.length) {setLetterError('Import your CV or paste its text before asking for a letter. We need your facts to write from.'); return;}
     setGenerating(true);
     setTab("coverletter");
     try {
@@ -614,7 +616,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
 
 
     // Record that the listing was opened
-    onApply("assisted");
+    onApply("assisted",coverLetter);
 
     // Send an optional copy of the prepared letter
     if (emailCopy && profile.email) {
@@ -644,7 +646,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
   // Open the listing and record activity, with an optional email copy.
   const manualApply = async () => {
     window.open(applyUrl, "_blank", "noopener,noreferrer");
-    onApply("manual");
+    onApply("manual",coverLetter);
     if (emailCopy && profile.email) {
       try {
         await sendEmail({
@@ -699,11 +701,12 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         </div>
 
         {/* Apply actions */}
-        {applied ? (
+        {applied && (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-sm">
-            {applied === "submitted" ? "✓ You confirmed that you submitted this application." : "↗ You opened this listing. Submission happens on the employer’s site."}
+            {applied === "submitted" ? "✓ You recorded this application as submitted." : applied === "saved" ? "Saved to your workspace. Apply when you are ready." : "Application tracked. Update its status in your workspace."}
           </div>
-        ) : reviewing ? (
+        )}
+        {reviewing ? (
           // Stage 2: cover letter is ready, show final action buttons
           <div>
             <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm mb-3">
@@ -756,7 +759,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
         )}
       </div>
 
-      <p className="form-help">AI letter writing sends your profile and this posting to the writing provider. Drafts are kept on this device. Review the facts before using them.</p>
+      <p className="form-help">AI letter writing sends your profile and this posting to the writing provider. The letter stays in this tab unless you download it or save it to your workspace. Review every claim before using it. A letter cannot guarantee consideration.</p>
       {profile.email && <label className="consent"><input type="checkbox" checked={emailCopy} onChange={event => setEmailCopy(event.target.checked)} />Email a copy of my preparation to {profile.email} when I open the listing.</label>}
 
       {letterError && <div className="notice error" role="alert">{letterError}<div className="button-row"><a className="text-link" href="/builder">Open my CV →</a><a className="text-link" href="/account">My workspace →</a></div></div>}
@@ -791,6 +794,7 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
             </div>
           </div>
         )}
+        {onTrack && <button className="button secondary" onClick={()=>onTrack(coverLetter)}>{user?'Save application to workspace':'Sign in to track this application'}</button>}
         {tab === "requirements" && job.evidence && <section className="notice" aria-label="Match explanation"><h3>Why this role is ranked here</h3><p>{job.evidence.score === null?'Not enough evidence for a score.':`${job.evidence.score}% text evidence match`}</p><p>Detected skill coverage: {job.evidence.skillsScore ?? 'unavailable'}{job.evidence.skillsScore!==null?'%':''}. Target-title overlap: {job.evidence.titleScore ?? 'unavailable'}{job.evidence.titleScore!==null?'%':''}.</p><p>Skills found in both: {job.evidence.matched.join(', ') || 'None detected'}.</p><p>Posting mentions not in your listed skills: {job.evidence.missing.join(', ') || 'None detected'}. These are not necessarily mandatory requirements.</p><p>{job.evidence.method}</p></section>}
         {tab === "requirements" && (
           <div>
@@ -824,13 +828,14 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
                   className="w-full bg-ink/3 border border-ink/8 rounded-xl text-ink/80 text-sm leading-relaxed p-4 resize-none focus:outline-none focus:border-indigo-400/30"
                   style={{ fontFamily: "'Outfit', sans-serif" }}
                 />
-                <div className="flex flex-wrap gap-3 mt-3"><button className="text-link" onClick={() => {if (window.confirm('Delete this letter draft from this device?')) {setCoverLetter(''); localStorage.removeItem(`jobai_letter_${job.id}`);}}}>Delete letter draft</button>
+                <div className="flex flex-wrap gap-3 mt-3"><button className="text-link" onClick={() => {if (window.confirm('Discard this letter draft?')) {setCoverLetter(''); localStorage.removeItem(`jobai_letter_${job.id}`);}}}>Delete letter draft</button>
                   <button
                     onClick={async () => { try {await navigator.clipboard.writeText(coverLetter); showToast("Copied to clipboard!", "success");} catch {showToast("Clipboard access failed. Copy the text from the letter above.", "warning");} }}
                     className="px-4 py-2 rounded-xl bg-ink/8 text-ink/60 text-sm hover:bg-ink/12 transition-all"
                   >
                     📋 Copy
                   </button>
+                  <button className="button secondary" onClick={()=>{const url=URL.createObjectURL(new Blob([coverLetter],{type:'text/plain;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='cover-letter.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}}>Download letter</button>
                   <button
                     onClick={generateCoverLetter}
                     disabled={generating}
@@ -870,88 +875,26 @@ Write a 3-paragraph cover letter. Professional, specific, compelling. Address to
   );
 }
 
-// ─── TRACKER PANEL ────────────────────────────────────────────────────────────
-function TrackerPanel({ applications, onClose, onStatusChange, onDelete }) {
-  const panelRef = useRef(null);
-  useEffect(() => {
-    const previous = document.activeElement;
-    panelRef.current?.focus();
-    const keydown = event => {
-      if (event.key === "Escape") onClose();
-      if (event.key === "Tab") {
-        const controls = panelRef.current?.querySelectorAll("button, select");
-        if (!controls?.length) return;
-        const first = controls[0], last = controls[controls.length - 1];
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {event.preventDefault(); last.focus();}
-        else if (!event.shiftKey && document.activeElement === last) {event.preventDefault(); first.focus();}
-      }
-    };
-    document.addEventListener("keydown", keydown);
-    return () => {document.removeEventListener("keydown", keydown); previous?.focus();};
-  }, [onClose]);
-  const statuses = { manual: "Opened listing", assisted: "Opened with prepared letter" };
-  return (
-    <div
-      className="fixed inset-0 z-40 flex justify-end"
-      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="tracker-title" tabIndex={-1}
-        className="w-full max-w-sm h-full overflow-y-auto"
-        style={{ background: "var(--bg-panel)", borderLeft: "1px solid var(--border-soft)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-ink font-bold text-lg" style={{ fontFamily: "'Playfair Display', serif" }} id="tracker-title">Application activity</h3>
-            <button aria-label="Close application activity" onClick={onClose} className="text-ink/40 hover:text-ink text-xl transition-colors">×</button>
-          </div>
-          {applications.length === 0 ? (
-            <div className="text-center py-12 text-ink/30 text-sm">No applications yet</div>
-          ) : (
-            <div className="space-y-3">
-              {applications.map((app, i) => (
-                <div key={i} className="rounded-xl bg-ink/3 border border-ink/8 p-4">
-                  <div className="text-ink font-semibold text-sm">{app.title}</div>
-                  <div className="text-ink/50 text-xs">{app.company}</div>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${app.method === "auto" ? "bg-indigo-500/20 text-indigo-300" : "bg-violet-500/20 text-violet-300"}`}>
-                      {app.status === "submitted" ? "Submitted (confirmed by you)" : statuses[app.method] || "Opened listing"}
-                    </span>
-                    <span className="text-ink/25 text-xs">{app.date}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-3 mt-3"><button className="text-link" onClick={() => onStatusChange(i, app.status === "submitted" ? "opened" : "submitted")}>{app.status === "submitted" ? "Mark as opened" : "I submitted this application"}</button><button className="text-link" aria-label={`Delete ${app.title} from activity`} onClick={() => onDelete(i)}>Delete</button></div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── JOB WORKFLOW ─────────────────────────────────────────────────────────────
 // Tiny localStorage helpers
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* Storage or optional notifications may be unavailable. */ } };
-const load = (key, fallback) => readStored(key, fallback, value => typeof value === typeof fallback);
 
-export default function JobSearch({ forceUpload = false, onProfileParsed, onImport, onBuildCV, user, onRequestSignIn }) {
+
+export default function JobSearch({ forceUpload = false, onProfileParsed, onImport, onBuildCV, onBuildProfile, user, onRequestSignIn }) {
   const [step, setStep] = useState(() => forceUpload ? 0 : readStored("jobai_step", 3, value => [0, 2, 3].includes(value)));
   const [uploadData, setUploadData] = useState(null);
   const [profile, setProfile] = useState(() => readJobProfile(normalizeProfile));
-  const [applications, setApplications] = useState(() => readActivity());
-  const [showTracker, setShowTracker] = useState(false);
-  const closeTracker = useCallback(() => setShowTracker(false), []);
+  const [applicationState,setApplicationState]=useState({owner:null,rows:[]});
+  const applications=applicationState.owner===user?.id?applicationState.rows:[];
+  const [trackingError,setTrackingError]=useState('');
+  const [trackingReload,setTrackingReload]=useState(0);
+  useEffect(()=>{if(!user)return;let active=true;listApplications(user.id).then(rows=>{if(active)setApplicationState({owner:user.id,rows:rows.map(row=>({...row.job,status:row.status}))});}).catch(err=>{if(active)setTrackingError(err.message);});return()=>{active=false;};},[user,trackingReload]);
 
   const handleUpload = (data) => {
     setUploadData(data);
     setStep(1);
     showToast("Uploading and analysing your CV…", "info");
   };
-
-  const authenticationRequired=()=>{setStep(0);onRequestSignIn?.(()=>handleUpload(uploadData));};
 
   const handleParsed = (parsedProfile) => {
     if (!parsedProfile) { setStep(0); return; }
@@ -971,54 +914,40 @@ export default function JobSearch({ forceUpload = false, onProfileParsed, onImpo
     showToast("Finding your best job matches…", "info");
   };
 
-  const handleApply = (job, method) => {
-    const app = {
-      id: job.id,
-      title: job.title,
-      company: job.company,
-      method,
-      status: "opened",
-      date: new Date().toLocaleDateString(),
-      board: job.board,
-      applyUrl: job.applyUrl || "",
-    };
-    setApplications((prev) => {
-      const updated = [app, ...prev.filter(previous => previous.id !== app.id)];
-      save("jobai_applications", updated);
-
-      return updated;
-    });
-  };
-
-  // Application activity is independent of the current CV.
-  const handleStatusChange = (index, status) => {setApplications(previous => {const updated = previous.map((app, i) => i === index ? {...app, status} : app); save("jobai_applications", updated); return updated;});};
-  const handleDelete = index => {setApplications(previous => {const updated = previous.filter((_, i) => i !== index); save("jobai_applications", updated); return updated;});};
+  async function track(job,letter='',account=user,method='saved'){
+    if(!account){onRequestSignIn?.(signedIn=>track(job,letter,signedIn,method));return;}
+    setTrackingError('');
+    try{await saveApplication(account.id,job,profile || EMPTY_PROFILE,method,letter);setTrackingReload(n=>n+1);showToast('Saved to your workspace. Update its status there after you apply.','success');}
+    catch(err){setTrackingError(err.message || 'Could not save this application. You can still apply on the original listing.');}
+  }
+  const handleApply=(job,method,letter='')=>{if(user && applications.some(row=>row.id===job.id))track(job,letter,user,method);};
 
   const handleReset = () => {
     ["jobai_step", "jobai_profile"].forEach((k) => localStorage.removeItem(k));
     setStep(0);
     setProfile(null);
     setUploadData(null);
-    showToast("Ready for another CV. Your application activity is still saved.", "info");
+    showToast("Ready for another CV. Your saved workspace records are unchanged.", "info");
   };
 
   return (
     <>
       {/* Main Content */}
       <main id="main-content" tabIndex={-1} className="job-workflow container fade-in">
-        <div className="flex flex-wrap justify-end gap-3 mb-6"><button className="button secondary" onClick={() => setShowTracker(true)}>Application activity ({applications.length})</button><button className="text-link" onClick={() => step === 0 ? setStep(3) : handleReset()}>{step === 0 ? "Explore jobs instead" : profile ? "Import a different CV" : "Import a CV"}</button></div>
+        <div className="flex flex-wrap justify-end gap-3 mb-6"><a className="button secondary" href="/account">{user?'Track my progress':'Sign in to track progress'}</a><button className="text-link" onClick={() => step === 0 ? setStep(3) : handleReset()}>{step === 0 ? "Explore jobs instead" : profile ? "Import a different CV" : "Import a CV"}</button></div>
+        {trackingError && <p className="notice error" role="alert">{trackingError}</p>}
         {step < 3 && (uploadData || step === 0) && <StepIndicator current={step} />}
 
         {step === 0 && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
         {step === 1 && uploadData && (
-          <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} onAuthenticationRequired={onRequestSignIn ? authenticationRequired : undefined} />
+          <ParsingStep file={uploadData.file} prompt={uploadData.prompt} onDone={handleParsed} />
         )}
         {/* If step=1 but uploadData is gone (page refresh during parse), fall back to upload */}
         {step === 1 && !uploadData && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
-        {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} />}
+        {step === 2 && profile && <ProfileStep profile={profile} onNext={handleProfileDone} onBuildCV={onBuildProfile}/>}
         {step === 3 && (
           <JobExplorer
-            user={user} onRequestSignIn={onRequestSignIn}
+            user={user} onTrack={track}
             applications={applications}
             profile={profile || EMPTY_PROFILE}
             onImport={onImport || handleReset}
@@ -1031,7 +960,7 @@ export default function JobSearch({ forceUpload = false, onProfileParsed, onImpo
         {step === 2 && !profile && <UploadStep onNext={handleUpload} initialData={uploadData} onBuildCV={onBuildCV} />}
       </main>
 
-      {showTracker && <TrackerPanel applications={applications} onClose={closeTracker} onStatusChange={handleStatusChange} onDelete={handleDelete} />}
+
       <ToastContainer />
     </>
   );
