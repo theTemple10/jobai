@@ -53,3 +53,8 @@ PDF/DOCX text extraction already happens locally; images need the separately con
 JSearch retrieves actual provider listings; RoleAide does not independently scrape employer pages or fabricate jobs. Search uses the reviewed target role and selected location. The first release does not claim a comprehensive search across every extracted related title. Results are deduplicated, normalized and ranked deterministically in the browser. Location restrictions are shown separately from the score. The candidate opens the original posting to verify availability and apply.
 
 Required release evidence: real email/code receipt, authenticated parse, reviewed profile, authenticated job retrieval, explanation consistent with source text, valid application link, invalid-session retry, supported mobile/desktop layouts, isolated account storage and verified deployed commit. Mocked tests establish control flow and calculations, not provider accuracy, email delivery or live release readiness.
+
+
+## October 29 implementation correction
+
+The owner did not configure token placeholders. Email-link sign-in is now primary; entering a code is an explicit optional alternative. A browser test simulates a callback in a second same-browser tab and verifies that Supabase session synchronization resumes the original CV request. Keeping that tab open is required to preserve the selected File. Using another browser or replacing/closing the original tab is not covered by this recovery behavior. No template edit is required for the link path. Actual mail delivery and the deployed flow still need acceptance.

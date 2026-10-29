@@ -379,6 +379,7 @@ test('homepage upload resumes after inline code sign-in and reaches ranked jobs 
   await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
   const dialog=page.getByRole('dialog',{name:'Sign in and continue'});await expect(dialog).toBeVisible();
   await dialog.getByLabel('Email address').fill('ada@example.com');await dialog.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
+  await dialog.getByRole('button',{name:'My email has a sign-in code'}).click();
   await dialog.getByLabel('Email sign-in code').fill('000000');await dialog.getByRole('button',{name:'Verify code and continue'}).click();
   await expect(dialog.getByRole('alert')).toContainText('expired');expect(parseCalls).toBe(1);
   await dialog.getByLabel('Email sign-in code').fill('123456');await dialog.getByRole('button',{name:'Verify code and continue'}).click();
@@ -405,4 +406,29 @@ test('closing inline sign-in retains the selected CV without sending an email',a
   await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('Your existing CV or rough notes')).toHaveValue(text);
   expect(emails).toBe(0);expect(await page.evaluate(()=>document.querySelector('.product-app').inert)).toBe(false);
+});
+
+
+test('email-link sign-in in another tab resumes the original CV without template edits',async({page,context})=>{
+  const user={id:'22222222-2222-4222-8222-222222222222',email:'ada@example.com',aud:'authenticated',role:'authenticated',app_metadata:{},user_metadata:{},created_at:new Date().toISOString()};
+  const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+  const accessToken=`${encode({alg:'HS256',typ:'JWT'})}.${encode({sub:user.id,aud:'authenticated',role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})}.test`;
+  await context.route('**/auth/v1/otp**',route=>route.fulfill({contentType:'application/json',body:'{}'}));
+  await context.route('**/auth/v1/user',route=>route.fulfill({contentType:'application/json',body:JSON.stringify(user)}));
+  await context.route('**/rest/v1/resumes?**',route=>route.fulfill({contentType:'application/json',body:'[]'}));
+  let requests=0;
+  await context.route('**/api/groq',route=>{
+    requests++;
+    if(!route.request().headers().authorization)return route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({error:'Please sign in.'})});
+    return route.fulfill({contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({name:'Ada Obi',title:'Developer',skills:['SQL']})}}]})});
+  });
+  await page.goto('/');await page.getByRole('button',{name:'Upload my CV and find jobs'}).click();await page.getByRole('button',{name:'Paste CV text',exact:true}).click();
+  await page.getByLabel('Your existing CV or rough notes').fill('Ada Obi. Developer. Built SQL reporting tools for a community project with accessible search.');
+  await page.getByLabel('I agree to send this CV').check();await page.getByRole('button',{name:'Analyse CV with AI'}).click();
+  const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();await dialog.getByLabel('Email address').fill('ada@example.com');await dialog.getByRole('button',{name:'Email me a sign-in link →',exact:true}).click();
+  await expect(dialog.getByRole('status')).toContainText('keeping this tab open');await expect(dialog.getByLabel('Email sign-in code')).toHaveCount(0);
+  const callback=await context.newPage();
+  await callback.goto(`/account#access_token=${accessToken}&refresh_token=test-refresh&token_type=bearer&expires_in=3600&type=magiclink`);
+  await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('Your name',{exact:true})).toHaveValue('Ada Obi');expect(requests).toBe(2);
+  await callback.close();
 });

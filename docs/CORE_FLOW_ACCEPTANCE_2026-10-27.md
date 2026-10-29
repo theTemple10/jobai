@@ -10,7 +10,7 @@ Found two concrete blockers: homepage imports were redirected into the CV builde
 
 - Homepage primary action uploads for job matching; extracted data proceeds to review and then discovery. Explicit imports started inside the builder still return to its editor.
 - A protected-operation 401 opens an accessible in-page sign-in dialog, keeping the upload/search component mounted. Sending an email shows status/cooldown; `verifyOtp` establishes the SDK session and the pending operation resumes with its access token. Cancelling or entering an expired code keeps the selected input available. No selected File or OTP is silently persisted as a recovery mechanism.
-- The owner's Magic Link and Confirm signup templates must include the token code. Redirects were reported corrected; actual delivery/return is not independently established.
+- Superseded October 29: email links are the primary sign-in path and code entry is optional. A new same-browser, two-tab test verifies that an email-link callback resumes the original CV tab; no email-template edit is required for that path. Code verification still requires the email to contain a code. Actual email delivery is not established by the mocked test.
 - Reviewed target title and selected skills inform search/ranking. Missing skills can be added. Signed-in profiles use extended JSearch; public remote discovery remains a separate limited option.
 - Text evidence ranking exposes 70% detected skill coverage and 30% target-title overlap when both exist, matched/missing terms and limitations. Existing candidate-skill coverage remains separate in details. No interview probability, universal ATS score or eligibility inference.
 - AI requests retain cancellation and a 60-second browser timeout.
@@ -27,7 +27,7 @@ Found two concrete blockers: homepage imports were redirected into the CV builde
 ## Required deployment and real acceptance
 
 1. Review/publish the code to a preview; confirm its deployed commit and environment variables.
-2. Verify both email templates and actual first-time/returning-user code delivery. Enter codes in the app; do not paste credentials in chat.
+2. Verify actual first-time/returning-user email-link delivery in the same browser while retaining the original CV tab. Optional code entry is also supported when codes are configured. Never paste authentication tokens or codes in chat.
 3. Use a synthetic or consented CV through actual parse → review → actual JSearch → evidence explanation → original listing. Check a real provider response for factual extraction and useful results.
 4. Verify authenticated CV CRUD/two-user isolation and server quotas. The owner's migration success and anonymous denial do not replace these tests.
 5. Check mobile, expired session, empty/unreadable document, no listings and provider outage states on the deployed version.

@@ -62,3 +62,8 @@ npm run test:browser
 ```
 
 Production browser tests require a fresh `dist` from `npm run build` and serve it on port 5174. Development browser tests use port 5173. The CI workflow is configured to run both and retain their failure traces; no remote CI result is claimed for this local change. Vercel cache headers are deployment configuration and must also be verified on the actual preview/production response.
+
+
+## October 29 execution checkpoint
+
+See LIVE_ACCEPTANCE_2026-10-29.md: rolled-back live database ownership/quota assertions passed; one synthetic Groq parse and one related JSearch request succeeded (six listings; 198 remaining). Existing-link authentication now resumes the original CV tab in a same-browser test; token-template edits are optional. GitHub main/public site still lacked the core fixes at inspection. Release/real email/deployed end-to-end acceptance remain open; no schema migration is required to recreate existing objects.
